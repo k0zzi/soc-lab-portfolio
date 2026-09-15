@@ -1,6 +1,6 @@
 # SOC Lab Portfolio
 
-A self-built Security Operations Center lab: SIEM detection engineering,
+A self-built Security Operations Center Lab: SIEM detection engineering,
 SOAR-driven threat intel correlation, and case management, built and
 verified end-to-end on a two-node Proxmox homelab.
 
