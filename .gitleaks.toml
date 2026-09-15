@@ -1,7 +1,7 @@
 # .gitleaks.toml
 #
-# Custom gitleaks config extending the default ruleset with a targeted
-# allowlist entry.
+# Custom gitleaks config extending the default ruleset with a targeted,
+# global allowlist entry.
 #
 # WHY THIS EXISTS: gitleaks' built-in "generic-api-key" rule is a broad
 # heuristic — it flags any high-entropy value sitting next to a field
@@ -11,7 +11,7 @@
 # own credential vault — not the credential value itself. It's a UUID,
 # which looks "random enough" to trip the generic rule, but it carries
 # no secret material on its own (Shuffle needs the actual instance +
-# valid session to resolve it into anything).
+# a valid session to resolve it into anything).
 #
 # Verified by hand: every file gitleaks flagged (misp-network-ioc.json,
 # misp-hash-ioc.json, misp-dns-ioc.json, port-scan-auto-block.json) was
@@ -24,7 +24,7 @@
 [extend]
 useDefault = true
 
-[[rules.allowlist]]
+[allowlist]
 description = "Shuffle workflow authentication_id fields are credential references, not secrets"
 regexes = [
   '''"authentication_id":"[0-9a-f-]{36}"''',
