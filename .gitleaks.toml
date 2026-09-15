@@ -1,0 +1,31 @@
+# .gitleaks.toml
+#
+# Custom gitleaks config extending the default ruleset with a targeted
+# allowlist entry.
+#
+# WHY THIS EXISTS: gitleaks' built-in "generic-api-key" rule is a broad
+# heuristic — it flags any high-entropy value sitting next to a field
+# name containing "auth"/"key"/"token"/"secret". Shuffle workflow
+# exports contain an `authentication_id` field on HTTP-type actions,
+# which is a REFERENCE ID pointing to a credential stored in Shuffle's
+# own credential vault — not the credential value itself. It's a UUID,
+# which looks "random enough" to trip the generic rule, but it carries
+# no secret material on its own (Shuffle needs the actual instance +
+# valid session to resolve it into anything).
+#
+# Verified by hand: every file gitleaks flagged (misp-network-ioc.json,
+# misp-hash-ioc.json, misp-dns-ioc.json, port-scan-auto-block.json) was
+# independently re-scanned for all known secret values plus a broad
+# heuristic sweep for any other 20+ character high-entropy string. No
+# actual secret material remains in any of them — every match traced to
+# either this authentication_id reference field or benign Shuffle
+# structural data (app IDs, node IDs, an SVG icon).
+
+[extend]
+useDefault = true
+
+[[rules.allowlist]]
+description = "Shuffle workflow authentication_id fields are credential references, not secrets"
+regexes = [
+  '''"authentication_id":"[0-9a-f-]{36}"''',
+]
