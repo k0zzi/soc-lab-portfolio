@@ -1,0 +1,50 @@
+<!-- Local rules -->
+<!-- Custom detection rules for the SOC Lab project. -->
+<!-- Each rule below is a child rule (if_sid) against a base rule that -->
+<!-- stays at its default level (usually 0). This preserves raw telemetry -->
+<!-- while adding a filtered/elevated detection layer on top. -->
+
+<!-- Suricata: port scan detection -->
+<group name="suricata,portscan,">
+  <rule id="100100" level="10">
+    <if_sid>86601</if_sid>
+    <field name="alert.signature">SCAN</field>
+    <description>Suricata: Port scan detected - $(alert.signature)</description>
+  </rule>
+</group>
+
+<!--
+  misp-network-ioc: Sysmon Event 3 (network connection).
+  Base rule 61605 stays at its default level (built-in ruleset, level 0) —
+  NOT overridden here. Only external (non-RFC1918/loopback/link-local)
+  destination IPs are elevated to level 3 and sent to MISP correlation.
+-->
+<group name="local,sysmon,misp_correlation,">
+  <rule id="100180" level="3">
+    <if_sid>61605</if_sid>
+    <field name="win.eventdata.destinationIp" type="pcre2" negate="yes">^(10\.|172\.(1[6-9]|2[0-9]|3[0-1])\.|192\.168\.|127\.|169\.254\.|::1|fe80:)</field>
+    <description>Sysmon Event 3: Network connection to external IP $(win.eventdata.destinationIp) by $(win.eventdata.image) - MISP correlation candidate</description>
+    <options>no_full_log</options>
+    <group>misp_network_check,</group>
+  </rule>
+</group>
+
+<!--
+  misp-dns-ioc / misp-hash-ioc: Sysmon Event 22 (DNS query) and Event 1
+  (process creation). Same child-rule pattern: base rules (61650, 61603)
+  stay at level 0, filtering/elevation happens here.
+-->
+<group name="local,sysmon,misp_correlation,">
+  <rule id="100160" level="3">
+    <if_sid>61650</if_sid>
+    <field name="win.eventdata.queryName" type="pcre2" negate="yes">(?i)(^_|\.soc\.dev\.?$|in-addr\.arpa$|(?!wpad$)^[^.]+$|msftconnecttest\.com$|\.windowsupdate\.com$|\.office\.com$|\.cloud\.microsoft$|onecdn\.static\.microsoft$)</field>
+    <description>Sysmon Event 22: DNS query $(win.eventdata.queryName) - MISP correlation candidate</description>
+    <group>misp_dns_check,</group>
+  </rule>
+
+  <rule id="100170" level="3">
+    <if_sid>61603</if_sid>
+    <description>Sysmon Event 1: Process $(win.eventdata.image) - MISP hash correlation candidate</description>
+    <group>misp_hash_check,</group>
+  </rule>
+</group>

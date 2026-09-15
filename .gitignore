@@ -1,0 +1,23 @@
+# --- Secrets (never commit) ---
+.env
+*.env
+*.pem
+*.key
+*.pfx
+*.p12
+
+# --- OS / editor noise ---
+.DS_Store
+Thumbs.db
+*.swp
+.vscode/
+.idea/
+
+# --- Logs / temp ---
+*.log
+*.tmp
+__pycache__/
+
+# --- Screenshots pending manual secret audit ---
+/staging-screenshots/
+.secrets-known.sh

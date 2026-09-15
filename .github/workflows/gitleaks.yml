@@ -1,0 +1,27 @@
+name: gitleaks
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+
+jobs:
+  scan:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Run gitleaks
+        uses: gitleaks/gitleaks-action@v2
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+# NOTE: gitleaks' default rules catch known-format secrets (AWS/GitHub/
+# Slack-style keys). Lab-specific random UUIDs and hex strings do NOT
+# match those patterns and will NOT be caught here — that is what
+# secret-scan.sh (run manually, pre-commit) is for. This CI step is a
+# second layer, not a replacement for it.
