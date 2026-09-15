@@ -1,0 +1,730 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Building a SOC Lab From Scratch: TheHive + Cortex — Case Management and Enrichment</title>
+<style>
+  @import url('https://fonts.googleapis.com/css2?family=Merriweather:ital,wght@0,300;0,400;0,700;1,300;1,400&family=Source+Code+Pro:wght@400;600&family=Inter:wght@400;500;600;700&display=swap');
+
+  *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+
+  :root {
+    --black: #0d0d0d;
+    --dark: #1a1a1a;
+    --mid: #2d2d2d;
+    --border: #2a2a2a;
+    --text: #e8e8e8;
+    --muted: #888;
+    --accent: #00ff88;
+    --accent2: #00c4ff;
+    --accent3: #ff4d6d;
+    --warn: #ffaa00;
+    --code-bg: #111;
+    --card: #181818;
+  }
+
+  *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+  body { background: var(--black); color: var(--text); font-family: 'Merriweather', Georgia, serif; font-size: 18px; line-height: 1.85; -webkit-font-smoothing: antialiased; }
+
+  .hero { background: linear-gradient(135deg, #0a0a0a 0%, #0d1a12 50%, #0a0f1a 100%); border-bottom: 1px solid var(--border); padding: 80px 24px 60px; text-align: center; position: relative; overflow: hidden; }
+  .hero::before { content: ''; position: absolute; inset: 0; background: radial-gradient(ellipse at 50% 0%, rgba(0,255,136,0.08) 0%, transparent 70%); pointer-events: none; }
+  .hero-tag { display: inline-block; font-family: 'Inter', sans-serif; font-size: 11px; font-weight: 600; letter-spacing: 3px; text-transform: uppercase; color: var(--accent); border: 1px solid rgba(0,255,136,0.3); padding: 4px 14px; border-radius: 2px; margin-bottom: 28px; }
+  .hero h1 { font-family: 'Merriweather', serif; font-size: clamp(28px, 5vw, 52px); font-weight: 700; line-height: 1.2; max-width: 820px; margin: 0 auto 24px; color: #fff; letter-spacing: -0.5px; }
+  .hero h1 span { color: var(--accent); }
+  .hero-sub { font-family: 'Inter', sans-serif; font-size: 16px; color: var(--muted); max-width: 580px; margin: 0 auto 40px; font-weight: 400; line-height: 1.6; }
+  .hero-meta { display: flex; align-items: center; justify-content: center; gap: 24px; font-family: 'Inter', sans-serif; font-size: 13px; color: var(--muted); flex-wrap: wrap; }
+  .hero-meta .dot { color: var(--border); }
+  .hero-meta strong { color: var(--text); }
+
+  .container { max-width: 740px; margin: 0 auto; padding: 0 24px; }
+  .content { padding: 64px 0 100px; }
+
+  .section-num { font-family: 'Inter', sans-serif; font-size: 11px; font-weight: 700; letter-spacing: 3px; text-transform: uppercase; color: var(--accent); margin-bottom: 8px; }
+  h2 { font-family: 'Merriweather', serif; font-size: 28px; font-weight: 700; color: #fff; margin-bottom: 20px; line-height: 1.3; letter-spacing: -0.3px; }
+  h3 { font-family: 'Inter', sans-serif; font-size: 15px; font-weight: 700; color: var(--accent2); margin: 36px 0 12px; letter-spacing: 0.5px; }
+  h4 { font-family: 'Inter', sans-serif; font-size: 15px; font-weight: 600; color: #ccc; margin: 28px 0 10px; }
+  p { margin-bottom: 24px; color: #ccc; font-weight: 300; }
+  .section { margin: 64px 0; padding-top: 48px; border-top: 1px solid var(--border); }
+
+  pre { background: var(--code-bg); border: 1px solid var(--border); border-left: 3px solid var(--accent); border-radius: 4px; padding: 24px 28px; overflow-x: auto; margin: 28px 0; position: relative; }
+  pre .label { position: absolute; top: 10px; right: 14px; font-family: 'Inter', sans-serif; font-size: 10px; font-weight: 600; letter-spacing: 1.5px; text-transform: uppercase; color: var(--muted); }
+  code { font-family: 'Source Code Pro', 'Courier New', monospace; font-size: 13.5px; line-height: 1.7; color: #e0e0e0; }
+  p code, li code { background: rgba(0,255,136,0.08); color: var(--accent); padding: 2px 7px; border-radius: 3px; font-size: 13px; border: 1px solid rgba(0,255,136,0.15); }
+
+  .c { color: #555; font-style: italic; }
+  .k { color: var(--accent2); }
+  .s { color: #ffd580; }
+  .v { color: var(--accent); }
+  .kw { color: var(--accent3); }
+
+  .callout { border-radius: 4px; padding: 20px 24px; margin: 32px 0; display: flex; gap: 16px; align-items: flex-start; }
+  .callout-icon { font-size: 20px; flex-shrink: 0; margin-top: 2px; }
+  .callout-body { font-family: 'Inter', sans-serif; font-size: 14px; line-height: 1.65; }
+  .callout-body strong { display: block; margin-bottom: 4px; font-size: 13px; letter-spacing: 0.5px; }
+  .callout.info { background: rgba(0,196,255,0.07); border: 1px solid rgba(0,196,255,0.2); color: #a8d8f0; }
+  .callout.info .callout-icon { color: var(--accent2); }
+  .callout.warn { background: rgba(255,170,0,0.07); border: 1px solid rgba(255,170,0,0.2); color: #f0d8a8; }
+  .callout.warn .callout-icon { color: var(--warn); }
+  .callout.success { background: rgba(0,255,136,0.06); border: 1px solid rgba(0,255,136,0.2); color: #a0e8c8; }
+  .callout.success .callout-icon { color: var(--accent); }
+  .callout.danger { background: rgba(255,77,109,0.07); border: 1px solid rgba(255,77,109,0.2); color: #f0a8b8; }
+  .callout.danger .callout-icon { color: var(--accent3); }
+
+  .table-wrap { overflow-x: auto; margin: 28px 0; }
+  table { width: 100%; border-collapse: collapse; font-family: 'Inter', sans-serif; font-size: 13.5px; }
+  th { background: var(--mid); color: var(--accent); font-weight: 600; font-size: 11px; letter-spacing: 1.5px; text-transform: uppercase; padding: 12px 16px; text-align: left; border-bottom: 2px solid var(--accent); }
+  td { padding: 12px 16px; border-bottom: 1px solid var(--border); color: #bbb; vertical-align: top; }
+  tr:last-child td { border-bottom: none; }
+  tr:hover td { background: rgba(255,255,255,0.02); }
+  td:first-child { color: #e0e0e0; font-weight: 500; }
+  .ok { color: var(--accent); font-weight: 600; }
+  .warn-cell { color: var(--warn); font-weight: 600; }
+
+  .steps { margin: 32px 0; }
+  .step { display: flex; gap: 20px; margin-bottom: 32px; align-items: flex-start; }
+  .step-num { flex-shrink: 0; width: 36px; height: 36px; background: var(--accent); color: #000; border-radius: 50%; display: flex; align-items: center; justify-content: center; font-family: 'Inter', sans-serif; font-weight: 700; font-size: 14px; margin-top: 3px; }
+  .step-body h4 { margin: 0 0 8px; color: #e8e8e8; font-size: 16px; }
+  .step-body p { margin: 0; font-size: 15px; }
+
+  .arch-diagram { background: var(--code-bg); border: 1px solid var(--border); border-radius: 4px; padding: 32px; margin: 32px 0; font-family: 'Source Code Pro', monospace; font-size: 13px; line-height: 1.8; color: #888; text-align: center; }
+  .arch-node { display: inline-block; border: 1px solid var(--accent); color: var(--accent); padding: 6px 16px; border-radius: 3px; font-size: 12px; font-weight: 600; letter-spacing: 1px; }
+  .arch-node.blue { border-color: var(--accent2); color: var(--accent2); }
+  .arch-node.red { border-color: var(--accent3); color: var(--accent3); }
+
+  .vm-card { background: var(--card); border: 1px solid var(--border); border-radius: 4px; padding: 28px; margin: 28px 0; }
+  .vm-card-title { font-family: 'Inter', sans-serif; font-size: 13px; font-weight: 700; letter-spacing: 2px; color: var(--accent); margin-bottom: 20px; padding-bottom: 12px; border-bottom: 1px solid var(--border); }
+  .vm-row { display: flex; justify-content: space-between; align-items: baseline; padding: 8px 0; border-bottom: 1px solid rgba(42,42,42,0.5); font-family: 'Inter', sans-serif; font-size: 14px; }
+  .vm-row:last-child { border-bottom: none; }
+  .vm-row .field { color: var(--muted); }
+  .vm-row .val { color: #e0e0e0; text-align: right; max-width: 60%; }
+  .vm-row .val.white { color: #fff; font-weight: 500; }
+
+  .key-insight { border-left: 3px solid var(--accent); padding: 16px 24px; margin: 32px 0; background: rgba(0,255,136,0.04); }
+  .key-insight p { font-size: 20px; font-style: italic; color: #ddd; margin: 0; line-height: 1.6; font-weight: 300; }
+
+  .badge { display: inline-block; font-family: 'Inter', sans-serif; font-size: 10px; font-weight: 700; letter-spacing: 1px; text-transform: uppercase; padding: 2px 8px; border-radius: 2px; margin-left: 8px; vertical-align: middle; }
+  .badge.done { background: rgba(0,255,136,0.15); color: var(--accent); border: 1px solid rgba(0,255,136,0.3); }
+  .badge.next { background: rgba(0,196,255,0.15); color: var(--accent2); border: 1px solid rgba(0,196,255,0.3); }
+
+  .checklist { list-style: none; margin: 20px 0; }
+  .checklist li { font-family: 'Inter', sans-serif; font-size: 15px; color: #bbb; padding: 10px 0; border-bottom: 1px solid var(--border); display: flex; align-items: center; gap: 12px; }
+  .checklist li:last-child { border-bottom: none; }
+
+  .series-nav { background: var(--card); border: 1px solid var(--border); border-radius: 4px; padding: 24px 28px; margin: 48px 0 0; font-family: 'Inter', sans-serif; }
+  .series-nav-label { font-size: 10px; font-weight: 700; letter-spacing: 2px; text-transform: uppercase; color: var(--muted); margin-bottom: 16px; }
+  .series-nav-links { display: flex; flex-direction: column; gap: 10px; }
+  .series-nav-item { display: flex; align-items: center; gap: 12px; font-size: 14px; color: #bbb; }
+  .series-nav-item .num { font-size: 11px; font-weight: 700; color: var(--accent); width: 24px; flex-shrink: 0; }
+  .series-nav-item.current { color: #fff; font-weight: 600; }
+  .series-nav-item a { color: var(--accent); text-decoration: none; }
+  .series-nav-item a:hover { text-decoration: underline; }
+
+  .footer { border-top: 1px solid var(--border); padding: 48px 24px; text-align: center; font-family: 'Inter', sans-serif; font-size: 13px; color: var(--muted); }
+  .footer strong { color: var(--text); }
+</style>
+</head>
+<body>
+
+<div class="hero">
+  <div class="hero-tag">SOC Lab Series — Chapter 6</div>
+  <h1>Building a <span>SOC Lab</span> From Scratch:<br>TheHive + Cortex — Case Management and Enrichment</h1>
+  <p class="hero-sub">Every port-scan detection turns into a case. Every case automatically asks one question about the source IP: who is this?</p>
+  <div class="hero-meta">
+    <span>~20 min read</span>
+    <span class="dot">·</span>
+    <span>Level: Advanced</span>
+    <span class="dot">·</span>
+    <strong>TheHive 5.5.3 · Cortex 4.0.0 · Ubuntu 24.04</strong>
+  </div>
+</div>
+
+<div class="container">
+<div class="content">
+
+  <!-- SERIES NAV -->
+  <div class="series-nav">
+    <div class="series-nav-label">SOC Lab Series</div>
+    <div class="series-nav-links">
+      <div class="series-nav-item"><span class="num">01</span><a href="#">Proxmox Installation, VM Configuration, and Remote Access →</a></div>
+      <div class="series-nav-item"><span class="num">02</span><a href="#">VLAN Segmentation with OPNsense and Active Directory →</a></div>
+      <div class="series-nav-item"><span class="num">03</span><a href="#">Centralized Security Monitoring with Wazuh, Sysmon, and FIM →</a></div>
+      <div class="series-nav-item"><span class="num">04</span><a href="#">Suricata IDS/IPS Integration →</a></div>
+      <div class="series-nav-item"><span class="num">05</span><a href="#">Automated Response with Shuffle SOAR →</a></div>
+      <div class="series-nav-item current"><span class="num">06</span>TheHive + Cortex — Case Management and Enrichment</div>
+      <div class="series-nav-item"><span class="num">07</span><a href="#">Velociraptor Digital Forensics →</a></div>
+    </div>
+  </div>
+
+  <!-- INTRO -->
+  <div style="margin-top: 64px;">
+    <p>This post documents the sixth chapter of the SOC Lab build series. In earlier chapters, Suricata detected and dropped threats, Wazuh analyzed the logs, and Shuffle handled automatic IP blocking in OPNsense. This chapter adds two new layers: TheHive turns every detection into a case, and Cortex automatically queries and enriches the IPs in those cases with external data.</p>
+
+    <p>TheHive and Cortex complement each other but run on independent VMs. That separation is deliberate: independent snapshots, separate fault domains, and a structure closer to a production SOC architecture.</p>
+
+    <div class="callout info">
+      <span class="callout-icon">ℹ</span>
+      <div class="callout-body">
+        <strong>Prerequisite</strong>
+        Shuffle SOAR from Chapter 5 needs to be installed and the port-scan-auto-block workflow running. In this chapter, TheHive and Cortex are installed on separate VMs, and an observable-creation node is added to the Shuffle workflow to complete the chain.
+      </div>
+    </div>
+  </div>
+
+  <!-- ARCHITECTURE -->
+  <div class="section">
+    <div class="section-num">Architecture</div>
+    <h2>Where TheHive and Cortex Sit in the SOC Stack</h2>
+
+    <p>TheHive is a SIRP (Security Incident Response Platform). It turns incoming alerts into cases, assigns tasks to analysts, and keeps a timeline. Cortex is the observable enrichment engine — it queries external sources about an IP, domain, or hash and writes the result back into the case.</p>
+
+    <p>Technically, enrichment could also be done through Wazuh's VirusTotal integration or a direct API call from Shuffle. Earlier in this lab, a VirusTotal integration was set up and tested through Wazuh. But that approach only shows a single analyst a log entry on their own screen — even if the event gets recorded, who investigated it, what action was taken, and where the process stands don't come together into something trackable and manageable.</p>
+
+    <p>In a real SOC, security events are handled by a team: one person does the initial triage, another runs the technical analysis, someone else reports up to a manager. TheHive makes that process manageable — every incident becomes a case, cases get assigned to analysts, every action taken lands on the timeline, and the whole team sees the same picture. Cortex enriches that picture further: by the time an analyst opens a case, data gathered from external sources about the IP is already sitting there waiting.</p>
+
+    <div class="arch-diagram">
+      <span class="arch-node red">Kali → Port Scan</span><br>
+      <span style="color:#444">↓</span><br>
+      <span class="arch-node blue">Suricata IPS → Wazuh → Shuffle</span><br>
+      <span style="color:#444">↓ &nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp; ↓</span><br>
+      <span style="display:inline-flex;gap:60px;justify-content:center;">
+        <span class="arch-node blue">OPNsense<br><span style="font-size:10px;letter-spacing:0">Block IP</span></span>
+        <span class="arch-node">TheHive · 10.1.30.12<br><span style="font-size:10px;letter-spacing:0">Case + Observable</span></span>
+      </span><br>
+      <span style="color:#444">↓</span><br>
+      <span class="arch-node">Cortex · 10.1.30.13<br><span style="font-size:10px;letter-spacing:0">AbuseIPDB · VirusTotal</span></span>
+    </div>
+
+    <div class="vm-card">
+      <div class="vm-card-title">VM Inventory — New Additions</div>
+      <div class="vm-row"><span class="field">thehive · 10.1.30.12</span><span class="val white">Ubuntu 24.04 · 16 GB RAM · TheHive 5.5.3</span></div>
+      <div class="vm-row"><span class="field">cortex · 10.1.30.13</span><span class="val white">Ubuntu 24.04 · 16 GB RAM · Cortex 4.0.0</span></div>
+      <div class="vm-row"><span class="field">VLAN</span><span class="val">30 — SOC · static IP · DHCP off</span></div>
+      <div class="vm-row"><span class="field">Access</span><span class="val">:9000 TheHive · :9001 Cortex</span></div>
+    </div>
+  </div>
+
+  <!-- STEP 1: THEHIVE SETUP -->
+  <div class="section">
+    <div class="section-num">Step 01</div>
+    <h2>Installing TheHive 5</h2>
+
+    <p>TheHive was installed using StrangeBee's official automated install script. The script sets up Java, Cassandra or local storage, Elasticsearch, and TheHive itself in one pass.</p>
+
+    <div class="callout info">
+      <span class="callout-icon">ℹ</span>
+      <div class="callout-body">
+        <strong>Why a Separate VM?</strong>
+        TheHive and Cortex can run on the same server, but they were put on separate VMs in this lab. Each can take its own snapshot, and one going down doesn't affect the other. Production SOC architectures make this same separation.
+      </div>
+    </div>
+
+    <div class="steps">
+      <div class="step">
+        <div class="step-num">1</div>
+        <div class="step-body">
+          <h4>VM Preparation</h4>
+          <p>New VM in Proxmox: Ubuntu 24.04, 16 GB RAM, 80 GB disk, VLAN30, static IP 10.1.30.12.</p>
+        </div>
+      </div>
+      <div class="step">
+        <div class="step-num">2</div>
+        <div class="step-body">
+          <h4>The StrangeBee Automated Script</h4>
+        </div>
+      </div>
+    </div>
+
+    <pre><code><span class="label">TheHive VM — 10.1.30.12</span>wget -q -O /tmp/install-thehive.sh https://archives.strangebee.com/scripts/install-thehive.sh
+sudo bash /tmp/install-thehive.sh</code></pre>
+
+    <p>The script presented installation options. <strong>"Install TheHive only"</strong> was chosen for this lab — since Cortex lives on its own VM, the combined install wasn't needed.</p>
+
+    <div class="steps">
+      <div class="step">
+        <div class="step-num">3</div>
+        <div class="step-body">
+          <h4>First Login and Creating the Organization</h4>
+          <p>Logged in at <code>http://10.1.30.12:9000</code> with the default admin account. Platform Management → Organizations → new org: <strong>soc.dev</strong></p>
+        </div>
+      </div>
+    </div>
+
+    <h3>User Structure</h3>
+
+    <p>Three users were created in TheHive, each with a deliberately separated role:</p>
+
+    <div class="vm-card">
+      <div class="vm-card-title">TheHive Users — Org: soc.dev</div>
+      <div class="vm-row"><span class="field">administrator@soc.dev</span><span class="val">org-admin · administrative tasks</span></div>
+      <div class="vm-row"><span class="field">zeynep.kocak@soc.dev</span><span class="val">analyst · case analysis</span></div>
+      <div class="vm-row"><span class="field">thehive-alert@soc.dev</span><span class="val white">Service · analyst · Shuffle integration</span></div>
+    </div>
+
+    <div class="callout info">
+      <span class="callout-icon">ℹ</span>
+      <div class="callout-body">
+        <strong>The Service Account Principle</strong>
+        The Shuffle integration runs through the <code>thehive-alert@soc.dev</code> service account, not the admin account. Its account type is marked "Service" — a dedicated type for API access. The service account isn't in Active Directory — it stays local to TheHive.
+      </div>
+    </div>
+
+    <div class="callout warn">
+      <span class="callout-icon">⚠</span>
+      <div class="callout-body">
+        <strong>Community License Limit</strong>
+        TheHive's community license caps an organization at 2 regular users. Service accounts don't count against that limit. The trial Platinum license lasts 15 days; after that, it drops back to the community license.
+      </div>
+    </div>
+  </div>
+
+  <!-- STEP 2: CORTEX SETUP -->
+  <div class="section">
+    <div class="section-num">Step 02</div>
+    <h2>Installing Cortex 4</h2>
+
+    <p>Cortex turned out to be more work than expected. StrangeBee's automated script misconfigures the Docker repository on Ubuntu 24.04, so the install failed. It was set up manually instead, following the official step-by-step documentation.</p>
+
+    <div class="callout danger">
+      <span class="callout-icon">✕</span>
+      <div class="callout-body">
+        <strong>StrangeBee Script Bug: Hardcoded Debian</strong>
+        Instead of detecting the OS dynamically, the script hardcodes <code>linux/debian</code> when adding the Docker repository. The install failed on every version tried, including Ubuntu 24.04, Debian 13, and Ubuntu 20.04. The official step-by-step guide detects the OS correctly using the <code>${ID}</code> variable.
+      </div>
+    </div>
+
+    <h3>1. Java Corretto 11</h3>
+
+    <pre><code><span class="label">Cortex VM — 10.1.30.13</span>wget -q -O - https://apt.corretto.aws/corretto.key | sudo gpg --dearmor \
+  -o /usr/share/keyrings/corretto.gpg
+echo "deb [signed-by=/usr/share/keyrings/corretto.gpg] \
+  https://apt.corretto.aws stable main" | \
+  sudo tee /etc/apt/sources.list.d/corretto.list
+sudo apt update
+sudo apt install -y java-11-amazon-corretto-jdk</code></pre>
+
+    <h3>2. Elasticsearch 8.x</h3>
+
+    <pre><code><span class="label">Cortex VM</span>wget -qO - https://artifacts.elastic.co/GPG-KEY-elasticsearch | \
+  sudo gpg --dearmor -o /usr/share/keyrings/elasticsearch-keyring.gpg
+echo "deb [signed-by=/usr/share/keyrings/elasticsearch-keyring.gpg] \
+  https://artifacts.elastic.co/packages/8.x/apt stable main" | \
+  sudo tee /etc/apt/sources.list.d/elastic-8.x.list
+sudo apt update
+sudo apt install -y elasticsearch</code></pre>
+
+    <div class="callout warn">
+      <span class="callout-icon">⚠</span>
+      <div class="callout-body">
+        <strong>Critical for Elasticsearch 8.x: xpack.security</strong>
+        Elasticsearch 8.x enables xpack.security automatically on install — SSL and authentication become mandatory. Cortex doesn't support that configuration. Without explicitly disabling three flags, Cortex can't connect to Elasticsearch at all.
+      </div>
+    </div>
+
+    <pre><code><span class="label">/etc/elasticsearch/elasticsearch.yml</span>xpack.security.enabled: <span class="kw">false</span>
+xpack.security.http.ssl.enabled: <span class="kw">false</span>
+xpack.security.transport.ssl.enabled: <span class="kw">false</span>
+
+<span class="c"># Cluster setting required for Cortex</span>
+cluster.name: hive
+http.host: <span class="s">127.0.0.1</span></code></pre>
+
+    <h3>3. Docker</h3>
+
+    <p>Cortex runs its analyzers as Docker containers. The <code>${ID}</code> variable was used during setup — this avoids StrangeBee's hardcoded-Debian bug.</p>
+
+    <pre><code><span class="label">Cortex VM</span>for pkg in docker.io docker-doc docker-compose podman-docker containerd runc; do
+  sudo apt-get remove -y $pkg 2>/dev/null
+done
+
+sudo apt-get install -y ca-certificates curl gnupg
+sudo install -m 0755 -d /etc/apt/keyrings
+curl -fsSL https://download.docker.com/linux/$(. /etc/os-release; echo "$ID")/gpg | \
+  sudo gpg --dearmor -o /etc/apt/keyrings/docker.gpg
+sudo chmod a+r /etc/apt/keyrings/docker.gpg
+
+echo "deb [arch=$(dpkg --print-architecture) \
+  signed-by=/etc/apt/keyrings/docker.gpg] \
+  https://download.docker.com/linux/$(. /etc/os-release; echo "$ID") \
+  $(. /etc/os-release; echo "$VERSION_CODENAME") stable" | \
+  sudo tee /etc/apt/sources.list.d/docker.list
+sudo apt-get update
+sudo apt-get install -y docker-ce docker-ce-cli containerd.io</code></pre>
+
+    <h3>4. cortexutils and the Cortex Package</h3>
+
+    <pre><code><span class="label">Cortex VM</span><span class="c"># cortexutils — needs --break-system-packages on Ubuntu 24.04</span>
+sudo pip3 install cortexutils --break-system-packages
+
+<span class="c"># Cortex DEB package</span>
+wget -qO - https://raw.githubusercontent.com/TheHive-Project/TheHive/master/PGP-PUBLIC-KEY | \
+  sudo gpg --dearmor -o /usr/share/keyrings/thehive-project.gpg
+echo "deb [signed-by=/usr/share/keyrings/thehive-project.gpg] \
+  https://deb.thehive-project.org release main" | \
+  sudo tee /etc/apt/sources.list.d/thehive-project.list
+sudo apt update
+sudo apt install -y cortex</code></pre>
+
+    <h3>5. Configuring Cortex</h3>
+
+    <pre><code><span class="label">/etc/cortex/application.conf</span>search {
+  uri = <span class="s">"http://127.0.0.1:9200"</span>
+}
+
+<span class="c"># secret.key — generate with:</span>
+<span class="c"># cat /dev/urandom | tr -dc 'a-zA-Z0-9' | fold -w 64 | head -n 1</span>
+play.http.secret.key = <span class="s">"[generated-random-key]"</span>
+
+cache.job = <span class="s">5 minutes</span>
+job {
+  runner = [DockerJob, ProcessJob]
+}</code></pre>
+
+    <div class="callout warn">
+      <span class="callout-icon">⚠</span>
+      <div class="callout-body">
+        <strong>A Common secret.key Mistake</strong>
+        The <code>play.http.secret.key</code> line was set to the path of the file holding the key, instead of the key value itself — Cortex wouldn't start. The value needs to go in directly as a string, not a file path.
+      </div>
+    </div>
+
+    <h3>6. Enabling the Services</h3>
+
+    <pre><code><span class="label">Cortex VM</span>sudo systemctl enable elasticsearch cortex
+sudo systemctl start elasticsearch
+sleep 15  <span class="c"># wait for Elasticsearch to come up</span>
+sudo systemctl start cortex</code></pre>
+
+    <div class="callout success">
+      <span class="callout-icon">✓</span>
+      <div class="callout-body">
+        <strong>Installation Complete</strong>
+        The Cortex interface came up at <code>http://10.1.30.13:9001</code>. Organization: <strong>soc.dev</strong>, user: <strong>cortexanalyzer</strong> created.
+      </div>
+    </div>
+  </div>
+
+  <!-- STEP 3: THEHIVE-CORTEX CONNECTION -->
+  <div class="section">
+    <div class="section-num">Step 03</div>
+    <h2>TheHive ↔ Cortex Integration</h2>
+
+    <p>The connection between the two tools is configured from TheHive's Connectors interface. Cortex's API key is registered with TheHive, which lets TheHive query Cortex directly for observables.</p>
+
+    <div class="steps">
+      <div class="step">
+        <div class="step-num">1</div>
+        <div class="step-body">
+          <h4>Create an API Key in Cortex</h4>
+          <p><code>http://10.1.30.13:9001</code> → log in as cortexanalyzer → top-right corner → API Key → generate and copy.</p>
+        </div>
+      </div>
+      <div class="step">
+        <div class="step-num">2</div>
+        <div class="step-body">
+          <h4>Add the Connector in TheHive</h4>
+          <p>TheHive → Platform Management → Connectors → Cortex → Servers → <strong>+</strong></p>
+        </div>
+      </div>
+    </div>
+
+    <div class="vm-card">
+      <div class="vm-card-title">Cortex Connector Settings</div>
+      <div class="vm-row"><span class="field">Server name</span><span class="val white">Cortex-Lab</span></div>
+      <div class="vm-row"><span class="field">Server URL</span><span class="val white">http://10.1.30.13:9001</span></div>
+      <div class="vm-row"><span class="field">API Key</span><span class="val">the cortexanalyzer user's key</span></div>
+    </div>
+
+    <div class="callout warn">
+      <span class="callout-icon">⚠</span>
+      <div class="callout-body">
+        <strong>The Connection Disappears After a VM Restart</strong>
+        TheHive keeps the Cortex connection in application state rather than writing it to a config file. When the VM restarts, the connection resets and has to be re-added from the connector page. This appeared to be a known TheHive 5 quirk at the time.
+        <br><br>
+        <em>Update: the real root cause turned out to be a startup-ordering race condition — TheHive was coming up before its backend database was actually ready. A systemd override enforcing the correct startup order, combined with defining the connector in TheHive's own config file, gives this a permanent fix rather than needing to re-add it by hand after every restart.</em>
+      </div>
+    </div>
+  </div>
+
+  <!-- STEP 4: ANALYZER CONFIGURATION -->
+  <div class="section">
+    <div class="section-num">Step 04</div>
+    <h2>Analyzer Configuration</h2>
+
+    <p>Cortex runs its analyzers as Docker containers. Two critical issues turned up after installation.</p>
+
+    <h3>Issue 1: The Docker Group</h3>
+
+    <p>The Cortex service runs as the <code>cortex</code> user. The Docker socket (<code>/var/run/docker.sock</code>) belongs to the <code>docker</code> group. Since the cortex user wasn't in that group, every analyzer failed with "Worker cannot be run."</p>
+
+    <pre><code><span class="label">Cortex VM</span><span class="c"># Diagnose the issue</span>
+id cortex
+<span class="c"># Output: groups=1000(cortex),4(adm)... — no docker group</span>
+
+<span class="c"># Fix it</span>
+sudo usermod -aG docker cortex
+sudo systemctl restart cortex</code></pre>
+
+    <div class="callout success">
+      <span class="callout-icon">✓</span>
+      <div class="callout-body">
+        <strong>The Docker Group Fix Is Critical</strong>
+        No analyzer works at all without this change. The error message ("Worker cannot be run") doesn't point directly at a Docker access problem — diagnosing it means running <code>id cortex</code> and <code>ls -la /var/run/docker.sock</code> and checking the group membership by hand.
+      </div>
+    </div>
+
+    <h3>Issue 2: The Analyzer List Doesn't Show Up</h3>
+
+    <p>Logging into Cortex as the global admin, the Analyzers tab appears empty. The analyzer list only shows up when logged in as the organization user (<code>cortexanalyzer</code>).</p>
+
+    <h3>Active Analyzers</h3>
+
+    <p>The following analyzers were enabled from the Organization → Analyzers tab, with free API keys entered:</p>
+
+    <div class="table-wrap">
+      <table>
+        <thead><tr><th>Analyzer</th><th>Source</th><th>Coverage</th><th>Limit</th></tr></thead>
+        <tbody>
+          <tr>
+            <td>AbuseIPDB_2_0</td>
+            <td>abuseipdb.com</td>
+            <td>IP reputation, report history, usage type, Tor flag</td>
+            <td class="ok">1,000 queries/day (free)</td>
+          </tr>
+          <tr>
+            <td>VirusTotal_GetReport_3_1</td>
+            <td>virustotal.com</td>
+            <td>IP/domain history, resolution records, security-engine scan results</td>
+            <td class="warn-cell">4 queries/min (free API)</td>
+          </tr>
+        </tbody>
+      </table>
+    </div>
+
+    <div class="callout info">
+      <span class="callout-icon">ℹ</span>
+      <div class="callout-body">
+        <strong>The VirusTotal Rate Limit</strong>
+        The free VirusTotal API key is capped at 4 queries per minute. The VirusTotal integration set up earlier in Wazuh was disabled for this reason — enrichment is now managed centrally through Cortex instead of splitting the query budget across two places.
+      </div>
+    </div>
+  </div>
+
+  <!-- STEP 5: SHUFFLE INTEGRATION -->
+  <div class="section">
+    <div class="section-num">Step 05</div>
+    <h2>Shuffle Integration: Automatic Observables</h2>
+
+    <p>In Chapter 5, Shuffle's port-scan-auto-block workflow already opened a case in TheHive automatically. This chapter adds one more node to that workflow: once a case is created, the source IP gets added to it as an observable automatically.</p>
+
+    <div class="arch-diagram" style="text-align:left; line-height:2.2;">
+      <div style="margin-left: 20px;">
+        Webhook → PortScanConfig → <span class="arch-node red" style="font-size:11px;">BLOCK branch</span><br>
+        &nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;↓<br>
+        &nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp; block-ip (OPNsense)<br>
+        &nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;↓<br>
+        &nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp; TheHive — Create Case <span class="arch-node" style="font-size:10px;padding:2px 8px;">✓ Chapter 5</span><br>
+        &nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;↓<br>
+        &nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp; TheHive — Create Observable <span class="arch-node" style="font-size:10px;padding:2px 8px;border-color:var(--accent);color:var(--accent);">✓ This chapter</span>
+      </div>
+    </div>
+
+    <h3>The Create Observable Node</h3>
+
+    <p>In Shuffle, the <strong>Create Observable in Case</strong> action was selected from the TheHive app.</p>
+
+    <div class="vm-card">
+      <div class="vm-card-title">Create Observable Node — Shuffle</div>
+      <div class="vm-row"><span class="field">Action</span><span class="val white">Create Observable in Case</span></div>
+      <div class="vm-row"><span class="field">CaseId</span><span class="val white">$thehive-api.body._id</span></div>
+      <div class="vm-row"><span class="field">Auth</span><span class="val">thehive-alert@soc.dev API key</span></div>
+    </div>
+
+    <pre><code><span class="label">Observable Body</span>{
+  <span class="s">"data"</span>: <span class="s">"$exec.all_fields.data.src_ip"</span>,
+  <span class="s">"dataType"</span>: <span class="s">"ip"</span>,
+  <span class="s">"message"</span>: <span class="s">"Source IP - automated port scan"</span>,
+  <span class="s">"tlp"</span>: 2,
+  <span class="s">"ioc"</span>: <span class="kw">true</span>,
+  <span class="s">"sighted"</span>: <span class="kw">true</span>,
+  <span class="s">"tags"</span>: [<span class="s">"automated"</span>, <span class="s">"port-scan"</span>, <span class="s">"src-ip"</span>]
+}</code></pre>
+
+    <div class="callout info">
+      <span class="callout-icon">ℹ</span>
+      <div class="callout-body">
+        <strong>The Case ID Variable</strong>
+        The response from the TheHive Create Case node includes a <code>body._id</code> field with the case's unique ID (e.g. <code>~16584</code>). The Create Observable node picks that up via <code>$thehive-api.body._id</code>. If the node's name is different, the variable name needs to be updated to match.
+      </div>
+    </div>
+  </div>
+
+  <!-- STEP 6: TEST -->
+  <div class="section">
+    <div class="section-num">Step 06</div>
+    <h2>End-to-End Verification</h2>
+
+    <h3>Cortex Enrichment Test</h3>
+
+    <p><code>185.220.101.1</code> (a known Tor exit node) was used to confirm Cortex correctly analyzes a genuinely malicious IP.</p>
+
+    <div class="table-wrap">
+      <table>
+        <thead><tr><th>Analyzer</th><th>IP</th><th>Result</th></tr></thead>
+        <tbody>
+          <tr>
+            <td>AbuseIPDB_2_0</td>
+            <td>185.220.101.1</td>
+            <td class="ok">Score=100 · Tor=True · Reports=47 · Usage=Commercial</td>
+          </tr>
+          <tr>
+            <td>VirusTotal_GetReport_3_1</td>
+            <td>185.220.101.1</td>
+            <td class="ok">200 resolutions · 17/91 detections</td>
+          </tr>
+          <tr>
+            <td>AbuseIPDB_2_0</td>
+            <td>10.1.70.10 (Kali)</td>
+            <td>Score=0 · Usage=Reserved — private IP, as expected</td>
+          </tr>
+        </tbody>
+      </table>
+    </div>
+
+    <h3>Automatic Observable Test</h3>
+
+    <p>Nmap was run from Kali. The Shuffle workflow fired. In the case opened in TheHive, the Observables tab confirmed the source IP had been added and tagged automatically.</p>
+
+    <div class="callout success">
+      <span class="callout-icon">✓</span>
+      <div class="callout-body">
+        <strong>The Full Chain Works</strong>
+        Port scan → block in OPNsense → open a TheHive case → add src_ip as an observable (tags: automated, port-scan, src-ip). By the time an analyst opens the case, the observable is already there, and AbuseIPDB or VirusTotal analysis can be kicked off with a single click.
+      </div>
+    </div>
+  </div>
+
+  <!-- TROUBLESHOOTING -->
+  <div class="section">
+    <div class="section-num">Troubleshooting</div>
+    <h2>Problems Hit During Setup</h2>
+
+    <div class="table-wrap">
+      <table>
+        <thead><tr><th>Problem</th><th>Cause</th><th>Fix</th></tr></thead>
+        <tbody>
+          <tr>
+            <td>The StrangeBee script fails during Docker setup</td>
+            <td>The script hardcodes <code>linux/debian</code> when adding the Docker repository — fails on Ubuntu 24.04</td>
+            <td class="ok">Followed the official step-by-step guide instead. It detects the OS dynamically using the <code>${ID}</code> variable</td>
+          </tr>
+          <tr>
+            <td>Cortex can't connect to Elasticsearch</td>
+            <td>ES 8.x enables xpack.security automatically on install, making SSL mandatory</td>
+            <td class="ok">Added three flags to elasticsearch.yml: <code>xpack.security.enabled: false</code>, <code>http.ssl.enabled: false</code>, <code>transport.ssl.enabled: false</code></td>
+          </tr>
+          <tr>
+            <td>Cortex won't start, secret.key error</td>
+            <td>A file path was entered in <code>play.http.secret.key</code> instead of the key value</td>
+            <td class="ok">Entered the key value directly as a string. Generated with <code>cat /dev/urandom | tr -dc 'a-zA-Z0-9' | fold -w 64 | head -n 1</code></td>
+          </tr>
+          <tr>
+            <td>The analyzer list doesn't show up in Cortex</td>
+            <td>The Analyzers tab isn't accessible from the global admin account</td>
+            <td class="ok">Logged in as the organization user (<code>cortexanalyzer</code>) instead — the Analyzers tab shows up on that account</td>
+          </tr>
+          <tr>
+            <td>"Worker cannot be run" — every analyzer fails</td>
+            <td>The cortex user isn't in the <code>docker</code> group — can't reach the Docker socket</td>
+            <td class="ok">Fixed with <code>sudo usermod -aG docker cortex</code> and <code>systemctl restart cortex</code></td>
+          </tr>
+          <tr>
+            <td>pip3 install cortexutils fails</td>
+            <td>Ubuntu 24.04 blocks pip installs into the system Python by default</td>
+            <td class="ok">Installed with <code>sudo pip3 install cortexutils --break-system-packages</code></td>
+          </tr>
+          <tr>
+            <td>The TheHive–Cortex connection disappears after a VM restart</td>
+            <td>The connection is kept in application state, not written to a config file</td>
+            <td class="ok">Re-added the server under Platform Management → Connectors → Cortex after the restart</td>
+          </tr>
+        </tbody>
+      </table>
+    </div>
+  </div>
+
+  <!-- SUMMARY -->
+  <div class="section">
+    <div class="section-num">Summary</div>
+    <h2>What Was Built, What's Running?</h2>
+
+    <div class="table-wrap">
+      <table>
+        <thead><tr><th>Component</th><th>Detail</th><th>Status</th></tr></thead>
+        <tbody>
+          <tr><td>TheHive 5.5.3</td><td>Ubuntu 24.04 · 10.1.30.12:9000 · org: soc.dev</td><td class="ok">● Active</td></tr>
+          <tr><td>User structure</td><td>administrator · zeynep.kocak (analyst) · thehive-alert (service)</td><td class="ok">● Configured</td></tr>
+          <tr><td>Cortex 4.0.0</td><td>Ubuntu 24.04 · 10.1.30.13:9001 · org: soc.dev</td><td class="ok">● Active</td></tr>
+          <tr><td>Elasticsearch 8.x</td><td>Cortex backend · xpack.security disabled</td><td class="ok">● Active</td></tr>
+          <tr><td>AbuseIPDB analyzer</td><td>IP reputation · 1,000 queries/day</td><td class="ok">● Active</td></tr>
+          <tr><td>VirusTotal analyzer</td><td>IP/domain history · 4 queries/min</td><td class="ok">● Active</td></tr>
+          <tr><td>TheHive ↔ Cortex connection</td><td>Connectors → Cortex-Lab · API key</td><td class="ok">● Connected</td></tr>
+          <tr><td>Shuffle observable node</td><td>port-scan-auto-block → automatic src_ip observable</td><td class="ok">● Running</td></tr>
+          <tr><td>Proxmox snapshot</td><td>thehive-cortex-integration · cortex-docker-group-fix</td><td class="ok">● Taken</td></tr>
+        </tbody>
+      </table>
+    </div>
+
+    <div class="callout info">
+      <span class="callout-icon">→</span>
+      <div class="callout-body">
+        <strong>Next Chapter</strong>
+        The next chapter adds a digital forensics layer with Velociraptor. When suspicious activity is detected on an endpoint, Velociraptor can perform on-demand artifact collection, process listing, and timeline analysis. It's configured to integrate with TheHive cases.
+      </div>
+    </div>
+  </div>
+
+  <!-- ROADMAP -->
+  <div class="section">
+    <div class="section-num">What's Next?</div>
+    <h2>Project Roadmap</h2>
+
+    <ul class="checklist">
+      <li>Proxmox installation and base virtualization infrastructure <span class="badge done">Complete</span></li>
+      <li>VLAN segmentation and firewall rules with OPNsense <span class="badge done">Complete</span></li>
+      <li>Active Directory Domain Services and GPO configuration <span class="badge done">Complete</span></li>
+      <li>Wazuh Manager installation, Sysmon GPO deployment, FIM configuration <span class="badge done">Complete</span></li>
+      <li>Suricata IPS integration — Netmap mode, active blocking <span class="badge done">Complete</span></li>
+      <li>Automated response workflows with Shuffle SOAR <span class="badge done">Complete</span></li>
+      <li>TheHive + Cortex — case management and enrichment <span class="badge done">Complete</span></li>
+      <li>Velociraptor (digital forensics) <span class="badge next">Next Step</span></li>
+      <li>MISP / OpenCTI (threat intelligence)</li>
+      <li>Grafana (dashboards)</li>
+      <li>OpenVAS / Greenbone (vulnerability management)</li>
+      <li>Atomic Red Team / Caldera (attack simulation)</li>
+    </ul>
+  </div>
+
+  <div class="series-nav">
+    <div class="series-nav-label">SOC Lab Series — All Chapters</div>
+    <div class="series-nav-links">
+      <div class="series-nav-item"><span class="num">01</span><a href="#">Proxmox Installation, VM Configuration, and Remote Access →</a></div>
+      <div class="series-nav-item"><span class="num">02</span><a href="#">VLAN Segmentation with OPNsense and Active Directory →</a></div>
+      <div class="series-nav-item"><span class="num">03</span><a href="#">Centralized Security Monitoring with Wazuh, Sysmon, and FIM →</a></div>
+      <div class="series-nav-item"><span class="num">04</span><a href="#">Suricata IDS/IPS Integration →</a></div>
+      <div class="series-nav-item"><span class="num">05</span><a href="#">Automated Response with Shuffle SOAR →</a></div>
+      <div class="series-nav-item current"><span class="num">06</span>TheHive + Cortex — Case Management and Enrichment</div>
+      <div class="series-nav-item"><span class="num">07</span><a href="#">Velociraptor Digital Forensics →</a></div>
+    </div>
+  </div>
+
+</div>
+</div>
+
+<div class="footer">
+  <p style="margin-bottom:8px"><strong>SOC Lab Series</strong> · Chapter 6 — TheHive + Cortex</p>
+  <p>TheHive 5.5.3 · Cortex 4.0.0 · Elasticsearch 8.x · Ubuntu 24.04 · Shuffle 0.9.x</p>
+</div>
+
+</body>
+</html>

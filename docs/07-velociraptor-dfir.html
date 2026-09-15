@@ -1,0 +1,799 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Building a SOC Lab From Scratch: Velociraptor — Digital Forensics and Incident Response</title>
+<style>
+  @import url('https://fonts.googleapis.com/css2?family=Merriweather:ital,wght@0,300;0,400;0,700;1,300;1,400&family=Source+Code+Pro:wght@400;600&family=Inter:wght@400;500;600;700&display=swap');
+
+  *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+
+  :root {
+    --black: #0d0d0d;
+    --dark: #1a1a1a;
+    --mid: #2d2d2d;
+    --border: #2a2a2a;
+    --text: #e8e8e8;
+    --muted: #888;
+    --accent: #00ff88;
+    --accent2: #00c4ff;
+    --accent3: #ff4d6d;
+    --warn: #ffaa00;
+    --code-bg: #111;
+    --card: #181818;
+  }
+
+  body { background: var(--black); color: var(--text); font-family: 'Merriweather', Georgia, serif; font-size: 18px; line-height: 1.85; -webkit-font-smoothing: antialiased; }
+
+  .hero { background: linear-gradient(135deg, #0a0a0a 0%, #0d1a12 50%, #0a0f1a 100%); border-bottom: 1px solid var(--border); padding: 80px 24px 60px; text-align: center; position: relative; overflow: hidden; }
+  .hero::before { content: ''; position: absolute; inset: 0; background: radial-gradient(ellipse at 50% 0%, rgba(0,255,136,0.08) 0%, transparent 70%); pointer-events: none; }
+  .hero-tag { display: inline-block; font-family: 'Inter', sans-serif; font-size: 11px; font-weight: 600; letter-spacing: 3px; text-transform: uppercase; color: var(--accent); border: 1px solid rgba(0,255,136,0.3); padding: 4px 14px; border-radius: 2px; margin-bottom: 28px; }
+  .hero h1 { font-family: 'Merriweather', serif; font-size: clamp(28px, 5vw, 52px); font-weight: 700; line-height: 1.2; max-width: 820px; margin: 0 auto 24px; color: #fff; letter-spacing: -0.5px; }
+  .hero h1 span { color: var(--accent); }
+  .hero-sub { font-family: 'Inter', sans-serif; font-size: 16px; color: var(--muted); max-width: 580px; margin: 0 auto 40px; font-weight: 400; line-height: 1.6; }
+  .hero-meta { display: flex; align-items: center; justify-content: center; gap: 24px; font-family: 'Inter', sans-serif; font-size: 13px; color: var(--muted); flex-wrap: wrap; }
+  .hero-meta .dot { color: var(--border); }
+  .hero-meta strong { color: var(--text); }
+
+  .container { max-width: 740px; margin: 0 auto; padding: 0 24px; }
+  .content { padding: 64px 0 100px; }
+
+  .section-num { font-family: 'Inter', sans-serif; font-size: 11px; font-weight: 700; letter-spacing: 3px; text-transform: uppercase; color: var(--accent); margin-bottom: 8px; }
+  h2 { font-family: 'Merriweather', serif; font-size: 28px; font-weight: 700; color: #fff; margin-bottom: 20px; line-height: 1.3; letter-spacing: -0.3px; }
+  h3 { font-family: 'Inter', sans-serif; font-size: 15px; font-weight: 700; color: var(--accent2); margin: 36px 0 12px; letter-spacing: 0.5px; }
+  h4 { font-family: 'Inter', sans-serif; font-size: 15px; font-weight: 600; color: #ccc; margin: 28px 0 10px; }
+  p { margin-bottom: 24px; color: #ccc; font-weight: 300; }
+  .section { margin: 64px 0; padding-top: 48px; border-top: 1px solid var(--border); }
+
+  pre { background: var(--code-bg); border: 1px solid var(--border); border-left: 3px solid var(--accent); border-radius: 4px; padding: 24px 28px; overflow-x: auto; margin: 28px 0; position: relative; }
+  pre .label { position: absolute; top: 10px; right: 14px; font-family: 'Inter', sans-serif; font-size: 10px; font-weight: 600; letter-spacing: 1.5px; text-transform: uppercase; color: var(--muted); }
+  code { font-family: 'Source Code Pro', 'Courier New', monospace; font-size: 13.5px; line-height: 1.7; color: #e0e0e0; }
+  p code, li code { background: rgba(0,255,136,0.08); color: var(--accent); padding: 2px 7px; border-radius: 3px; font-size: 13px; border: 1px solid rgba(0,255,136,0.15); }
+
+  .c { color: #555; font-style: italic; }
+  .k { color: var(--accent2); }
+  .s { color: #ffd580; }
+  .v { color: var(--accent); }
+  .kw { color: var(--accent3); }
+
+  .callout { border-radius: 4px; padding: 20px 24px; margin: 32px 0; display: flex; gap: 16px; align-items: flex-start; }
+  .callout-icon { font-size: 20px; flex-shrink: 0; margin-top: 2px; }
+  .callout-body { font-family: 'Inter', sans-serif; font-size: 14px; line-height: 1.65; }
+  .callout-body strong { display: block; margin-bottom: 4px; font-size: 13px; letter-spacing: 0.5px; }
+  .callout.info { background: rgba(0,196,255,0.07); border: 1px solid rgba(0,196,255,0.2); color: #a8d8f0; }
+  .callout.info .callout-icon { color: var(--accent2); }
+  .callout.warn { background: rgba(255,170,0,0.07); border: 1px solid rgba(255,170,0,0.2); color: #f0d8a8; }
+  .callout.warn .callout-icon { color: var(--warn); }
+  .callout.success { background: rgba(0,255,136,0.06); border: 1px solid rgba(0,255,136,0.2); color: #a0e8c8; }
+  .callout.success .callout-icon { color: var(--accent); }
+  .callout.danger { background: rgba(255,77,109,0.07); border: 1px solid rgba(255,77,109,0.2); color: #f0a8b8; }
+  .callout.danger .callout-icon { color: var(--accent3); }
+
+  .table-wrap { overflow-x: auto; margin: 28px 0; }
+  table { width: 100%; border-collapse: collapse; font-family: 'Inter', sans-serif; font-size: 13.5px; }
+  th { background: var(--mid); color: var(--accent); font-weight: 600; font-size: 11px; letter-spacing: 1.5px; text-transform: uppercase; padding: 12px 16px; text-align: left; border-bottom: 2px solid var(--accent); }
+  td { padding: 12px 16px; border-bottom: 1px solid var(--border); color: #bbb; vertical-align: top; }
+  tr:last-child td { border-bottom: none; }
+  tr:hover td { background: rgba(255,255,255,0.02); }
+  td:first-child { color: #e0e0e0; font-weight: 500; }
+  .ok { color: var(--accent); font-weight: 600; }
+  .warn-cell { color: var(--warn); font-weight: 600; }
+  .danger-cell { color: var(--accent3); font-weight: 600; }
+
+  .steps { margin: 32px 0; }
+  .step { display: flex; gap: 20px; margin-bottom: 32px; align-items: flex-start; }
+  .step-num { flex-shrink: 0; width: 36px; height: 36px; background: var(--accent); color: #000; border-radius: 50%; display: flex; align-items: center; justify-content: center; font-family: 'Inter', sans-serif; font-weight: 700; font-size: 14px; margin-top: 3px; }
+  .step-body h4 { margin: 0 0 8px; color: #e8e8e8; font-size: 16px; }
+  .step-body p { margin: 0; font-size: 15px; }
+
+  .arch-diagram { background: var(--code-bg); border: 1px solid var(--border); border-radius: 4px; padding: 32px; margin: 32px 0; font-family: 'Source Code Pro', monospace; font-size: 13px; line-height: 1.8; color: #888; text-align: center; }
+  .arch-node { display: inline-block; border: 1px solid var(--accent); color: var(--accent); padding: 6px 16px; border-radius: 3px; font-size: 12px; font-weight: 600; letter-spacing: 1px; }
+  .arch-node.blue { border-color: var(--accent2); color: var(--accent2); }
+  .arch-node.red { border-color: var(--accent3); color: var(--accent3); }
+
+  .vm-card { background: var(--card); border: 1px solid var(--border); border-radius: 4px; padding: 28px; margin: 28px 0; }
+  .vm-card-title { font-family: 'Inter', sans-serif; font-size: 13px; font-weight: 700; letter-spacing: 2px; color: var(--accent); margin-bottom: 20px; padding-bottom: 12px; border-bottom: 1px solid var(--border); }
+  .vm-row { display: flex; justify-content: space-between; align-items: baseline; padding: 8px 0; border-bottom: 1px solid rgba(42,42,42,0.5); font-family: 'Inter', sans-serif; font-size: 14px; }
+  .vm-row:last-child { border-bottom: none; }
+  .vm-row .field { color: var(--muted); }
+  .vm-row .val { color: #e0e0e0; text-align: right; max-width: 60%; }
+  .vm-row .val.white { color: #fff; font-weight: 500; }
+
+  .key-insight { border-left: 3px solid var(--accent); padding: 16px 24px; margin: 32px 0; background: rgba(0,255,136,0.04); }
+  .key-insight p { font-size: 20px; font-style: italic; color: #ddd; margin: 0; line-height: 1.6; font-weight: 300; }
+
+  .badge { display: inline-block; font-family: 'Inter', sans-serif; font-size: 10px; font-weight: 700; letter-spacing: 1px; text-transform: uppercase; padding: 2px 8px; border-radius: 2px; margin-left: 8px; vertical-align: middle; }
+  .badge.done { background: rgba(0,255,136,0.15); color: var(--accent); border: 1px solid rgba(0,255,136,0.3); }
+  .badge.next { background: rgba(0,196,255,0.15); color: var(--accent2); border: 1px solid rgba(0,196,255,0.3); }
+
+  .checklist { list-style: none; margin: 20px 0; }
+  .checklist li { font-family: 'Inter', sans-serif; font-size: 15px; color: #bbb; padding: 10px 0; border-bottom: 1px solid var(--border); display: flex; align-items: center; gap: 12px; }
+  .checklist li:last-child { border-bottom: none; }
+
+  .series-nav { background: var(--card); border: 1px solid var(--border); border-radius: 4px; padding: 24px 28px; margin: 48px 0 0; font-family: 'Inter', sans-serif; }
+  .series-nav-label { font-size: 10px; font-weight: 700; letter-spacing: 2px; text-transform: uppercase; color: var(--muted); margin-bottom: 16px; }
+  .series-nav-links { display: flex; flex-direction: column; gap: 10px; }
+  .series-nav-item { display: flex; align-items: center; gap: 12px; font-size: 14px; color: #bbb; }
+  .series-nav-item .num { font-size: 11px; font-weight: 700; color: var(--accent); width: 24px; flex-shrink: 0; }
+  .series-nav-item.current { color: #fff; font-weight: 600; }
+  .series-nav-item a { color: var(--accent); text-decoration: none; }
+  .series-nav-item a:hover { text-decoration: underline; }
+
+  .footer { border-top: 1px solid var(--border); padding: 48px 24px; text-align: center; font-family: 'Inter', sans-serif; font-size: 13px; color: var(--muted); }
+  .footer strong { color: var(--text); }
+</style>
+</head>
+<body>
+
+<div class="hero">
+  <div class="hero-tag">SOC Lab Series — Chapter 7</div>
+  <h1>Building a <span>SOC Lab</span> From Scratch:<br>Velociraptor — Digital Forensics and Incident Response</h1>
+  <p class="hero-sub">Wazuh says "something suspicious is happening on the network." Velociraptor answers a different question: "what exactly happened on this machine?" — fleet-wide hunts, live VQL queries, artifact collection.</p>
+  <div class="hero-meta">
+    <span>~25 min read</span>
+    <span class="dot">·</span>
+    <span>Level: Advanced</span>
+    <span class="dot">·</span>
+    <strong>Velociraptor v0.76.5 · Ubuntu 24.04 · GPO Deployment</strong>
+  </div>
+</div>
+
+<div class="container">
+<div class="content">
+
+  <!-- SERIES NAV -->
+  <div class="series-nav">
+    <div class="series-nav-label">SOC Lab Series</div>
+    <div class="series-nav-links">
+      <div class="series-nav-item"><span class="num">01</span><a href="#">Proxmox Installation, VM Configuration, and Remote Access →</a></div>
+      <div class="series-nav-item"><span class="num">02</span><a href="#">VLAN Segmentation with OPNsense and Active Directory →</a></div>
+      <div class="series-nav-item"><span class="num">03</span><a href="#">Centralized Security Monitoring with Wazuh, Sysmon, and FIM →</a></div>
+      <div class="series-nav-item"><span class="num">04</span><a href="#">Suricata IDS/IPS Integration →</a></div>
+      <div class="series-nav-item"><span class="num">05</span><a href="#">Automated Response with Shuffle SOAR →</a></div>
+      <div class="series-nav-item"><span class="num">06</span><a href="#">TheHive + Cortex — Case Management and Enrichment →</a></div>
+      <div class="series-nav-item current"><span class="num">07</span>Velociraptor — Digital Forensics and Incident Response</div>
+    </div>
+  </div>
+
+  <!-- INTRO -->
+  <div style="margin-top: 64px;">
+    <p>This post documents the seventh chapter of the SOC Lab build series. The previous six chapters set up detection (Suricata, Wazuh), response automation (Shuffle), and case management (TheHive + Cortex). This chapter adds a digital forensics (DFIR) layer to the stack: Velociraptor.</p>
+
+    <p>Every tool so far has been asking "did something happen?" Velociraptor answers a different question: <strong>"what actually happened on this endpoint?"</strong> When Wazuh generates an alert, Velociraptor can connect to that machine instantly and query a live, real-time picture — process list, network connections, prefetch, registry, event logs. It's the open-source equivalent of the "live response" feature found in commercial EDR products like CrowdStrike Falcon or Tanium.</p>
+
+    <div class="callout info">
+      <span class="callout-icon">ℹ</span>
+      <div class="callout-body">
+        <strong>Prerequisite</strong>
+        The Wazuh agents on SRV201, SRV202, and CLT601 from Chapter 3 need to be installed and deployed via the Sysmon GPO. This chapter adds the Velociraptor agent to the same three machines via GPO Software Installation — the same method used for the Sysmon rollout.
+      </div>
+    </div>
+  </div>
+
+  <!-- ARCHITECTURE -->
+  <div class="section">
+    <div class="section-num">Architecture</div>
+    <h2>Where Velociraptor Sits in the SOC Stack</h2>
+
+    <p>Velociraptor is developed by Velocidex, part of Rapid7 — its founder, Mike Cohen, is an engineer who worked on digital forensics at Google. The tool is fully open source (AGPL) and isn't a hobby project: it's a reference tool in SANS Institute's DFIR curriculum (particularly FOR508 — Advanced Incident Response), and DFIR consultancies like Mandiant and KPMG use it in real operations.</p>
+
+    <div class="table-wrap">
+      <table>
+        <thead><tr><th>Tool</th><th>Type</th><th>Price</th><th>Note</th></tr></thead>
+        <tbody>
+          <tr><td>CrowdStrike Falcon</td><td>EDR + IR</td><td>$$$$$</td><td>Market leader, cloud-dependent</td></tr>
+          <tr><td>Carbon Black</td><td>EDR + IR</td><td>$$$$</td><td>Part of VMware</td></tr>
+          <tr><td>Tanium</td><td>Endpoint mgmt + IR</td><td>$$$$$</td><td>Enterprise, large scale</td></tr>
+          <tr><td>KAPE</td><td>Forensic triage</td><td>Free</td><td>Offline, no agent — a different use case</td></tr>
+          <tr><td>Velociraptor</td><td>DFIR platform</td><td class="ok">Free (AGPL)</td><td>Agent-based, live response, fleet hunting</td></tr>
+        </tbody>
+      </table>
+    </div>
+
+    <p>It doesn't overlap with Wazuh — the two answer different questions. Wazuh is an always-on <em>detection</em> layer: logs get collected, rules match, alerts fire. Velociraptor is an on-demand <em>investigation</em> layer: once an alert comes in, you can ask "so what's actually on this machine?" live, using VQL (Velociraptor Query Language). Wazuh alerts become the trigger for a Velociraptor investigation.</p>
+
+    <div class="callout success">
+      <span class="callout-icon">🛡</span>
+      <div class="callout-body">
+        <strong>A Defense-Sector Perspective</strong>
+        Velociraptor runs entirely on-premise — forensic data never touches the cloud. That's the core reason cloud-dependent tools like CrowdStrike are unacceptable in some defense-sector environments. Open-source licensing is also an increasingly common preference in public-sector procurement for supply-chain security reasons — not because of budget constraints.
+      </div>
+    </div>
+
+    <div class="arch-diagram">
+      <span class="arch-node blue">Wazuh Alert → "Something suspicious here"</span><br>
+      <span style="color:#444">↓</span><br>
+      <span class="arch-node">Velociraptor · 10.1.30.14<br><span style="font-size:10px;letter-spacing:0">VQL · Fleet Hunt · Artifact Collection</span></span><br>
+      <span style="color:#444">↓</span><br>
+      <span style="display:inline-flex;gap:24px;justify-content:center;">
+        <span class="arch-node">SRV201</span>
+        <span class="arch-node">SRV202</span>
+        <span class="arch-node">CLT601</span>
+      </span>
+    </div>
+
+    <div class="vm-card">
+      <div class="vm-card-title">VM Inventory — New Addition</div>
+      <div class="vm-row"><span class="field">velociraptor (SRV-VELO-305)</span><span class="val white">10.1.30.14 · Ubuntu 24.04 · 4 GB RAM · 50 GB disk</span></div>
+      <div class="vm-row"><span class="field">Storage pool</span><span class="val">sataProd.srv (ADATA SU650 SATA)</span></div>
+      <div class="vm-row"><span class="field">VLAN</span><span class="val">30 — SOC · static IP · DHCP off</span></div>
+      <div class="vm-row"><span class="field">Access</span><span class="val">:8889 GUI (HTTPS) · :8000 Frontend (agent)</span></div>
+      <div class="vm-row"><span class="field">Agent fleet</span><span class="val">SRV201 · SRV202 · CLT601</span></div>
+    </div>
+
+    <div class="callout info">
+      <span class="callout-icon">ℹ</span>
+      <div class="callout-body">
+        <strong>Why ADATA SU650 (SATA), Why 50 GB?</strong>
+        Velociraptor works on a hunt basis — it isn't a continuously-writing log collection service. Process list, registry, and event log queries produce a few MB per hunt; file collection is used rarely. That profile fits the SATA pool well, without burning through NVMe write endurance. 50 GB matches TheHive/Cortex's disk size — plenty of headroom even if the datastore grows.
+      </div>
+    </div>
+  </div>
+
+  <!-- STEP 1: SERVER SETUP -->
+  <div class="section">
+    <div class="section-num">Step 01</div>
+    <h2>Server Installation</h2>
+
+    <p>Unlike the other tools, Velociraptor runs as a <strong>single binary</strong> — the same file acts as server, client, and admin CLI. No package manager, no dependencies, no repositories to add. It's the simplest install process in this lab. The official quickstart documentation (docs.velociraptor.app) was followed.</p>
+
+    <div class="callout warn">
+      <span class="callout-icon">⚠</span>
+      <div class="callout-body">
+        <strong>v0.76.5 — Not v0.76.6</strong>
+        v0.76.6 has a known bug in the <code>debian server</code> command (package generation fails). <strong>v0.76.5</strong> was used for this lab.
+      </div>
+    </div>
+
+    <h3>1. Downloading the Binary</h3>
+
+    <pre><code><span class="label">Velociraptor VM — 10.1.30.14</span>mkdir ~/velociraptor_setup && cd ~/velociraptor_setup
+
+wget -O velociraptor https://github.com/Velocidex/velociraptor/releases/download/v0.76.5/velociraptor-v0.76.5-linux-amd64
+chmod +x velociraptor
+
+./velociraptor version</code></pre>
+
+    <h3>2. The Config Wizard</h3>
+
+    <pre><code><span class="label">Velociraptor VM</span>./velociraptor config generate -i</code></pre>
+
+    <div class="table-wrap">
+      <table>
+        <thead><tr><th>Question</th><th>Answer</th><th>Note</th></tr></thead>
+        <tbody>
+          <tr><td>Deployment type</td><td>Self Signed SSL</td><td>Fine for a lab, private network</td></tr>
+          <tr><td>Public DNS name / IP</td><td><code>10.1.30.14</code></td><td>Leaving it as <code>localhost</code> means agents can't connect</td></tr>
+          <tr><td>DNS Type</td><td>None</td><td>Default</td></tr>
+          <tr><td>WebSocket</td><td>No</td><td>Experimental, not needed for a lab</td></tr>
+          <tr><td>Frontend port</td><td>8000</td><td>Default — agent communication</td></tr>
+          <tr><td>GUI port</td><td>8889</td><td>Default — admin interface</td></tr>
+          <tr><td>Admin username / password</td><td><code>admin</code> / (set)</td><td>The second-user prompt was skipped — one admin is enough</td></tr>
+          <tr><td>Output file</td><td><code>server.config.yaml</code></td><td>Default filename</td></tr>
+        </tbody>
+      </table>
+    </div>
+
+    <div class="callout danger">
+      <span class="callout-icon">⚠</span>
+      <div class="callout-body">
+        <strong>Critical: bind_address Defaults to 127.0.0.1</strong>
+        By default, the wizard writes <code>bind_address: 127.0.0.1</code> (loopback) for both Frontend and GUI — meaning only the VM itself can connect. Without fixing this, Windows agents can't reach the Frontend (8000), and the GUI (8889) can't be reached from a browser elsewhere either.
+      </div>
+    </div>
+
+    <pre><code><span class="label">server.config.yaml</span><span class="c"># Frontend section:</span>
+Frontend:
+  bind_address: <span class="v">0.0.0.0</span>   <span class="c"># changed from 127.0.0.1</span>
+
+<span class="c"># GUI section:</span>
+GUI:
+  bind_address: <span class="v">0.0.0.0</span>   <span class="c"># changed from 127.0.0.1</span></code></pre>
+
+    <p><code>0.0.0.0</code> means "accept connections from every interface." Access control is already handled by OPNsense's firewall rules, so this isn't a security concern — if anything, it's more in line with defense-in-depth, since the control point sits at the network layer.</p>
+
+    <h3>3. The Debian Package and Installation</h3>
+
+    <pre><code><span class="label">Velociraptor VM</span>./velociraptor debian server --config ./server.config.yaml
+
+sudo dpkg -i velociraptor-server-0.76.5.amd64.deb
+
+systemctl status velociraptor_server.service</code></pre>
+
+    <p>The install automatically creates and starts a systemd service. Port check:</p>
+
+    <pre><code><span class="label">Velociraptor VM</span>nc -vz 127.0.0.1 8889   <span class="c"># GUI → succeeded</span>
+nc -vz 127.0.0.1 8000   <span class="c"># Frontend → succeeded</span></code></pre>
+
+    <h3>4. OPNsense Firewall Rules</h3>
+
+    <div class="table-wrap">
+      <table>
+        <thead><tr><th>Source</th><th>Destination</th><th>Port</th><th>Purpose</th></tr></thead>
+        <tbody>
+          <tr><td>VLAN10 (Mgmt)</td><td>10.1.30.14</td><td>8889 / TCP</td><td>Admin GUI access</td></tr>
+          <tr><td>VLAN20 + VLAN60</td><td>10.1.30.14</td><td>8000 / TCP</td><td>Agent → Frontend connection</td></tr>
+        </tbody>
+      </table>
+    </div>
+
+    <h3>5. GUI Access</h3>
+
+    <p>Browser: <code>https://10.1.30.14:8889</code> — clicked through the self-signed certificate warning and logged in as <code>admin</code>.</p>
+  </div>
+
+  <!-- STEP 2: EXTRA ARTIFACTS -->
+  <div class="section">
+    <div class="section-num">Step 02</div>
+    <h2>Importing Extra Artifacts</h2>
+
+    <p>Velociraptor works with YAML-defined VQL query bundles called "artifacts" — each one is a ready-made recipe for querying a specific data source (process list, a registry key, an event log, etc.). The core install ships with a few hundred artifacts, but additional sets produced by the community and Rapid7 Labs can be imported with one click from the GUI.</p>
+
+    <div class="steps">
+      <div class="step">
+        <div class="step-num">1</div>
+        <div class="step-body">
+          <h4>Run Server.Import.Extras</h4>
+          <p>GUI → Server Artifacts → <code>Server.Import.Extras</code> → Launch. This artifact downloads the extra bundles from GitHub and registers them on the server.</p>
+        </div>
+      </div>
+    </div>
+
+    <p>The bundles imported, totaling <strong>359 additional artifacts</strong>:</p>
+
+    <div class="table-wrap">
+      <table>
+        <thead><tr><th>Bundle</th><th>Contents</th></tr></thead>
+        <tbody>
+          <tr><td>Sigma</td><td>Sigma rule engine — the generic detection-as-code format</td></tr>
+          <tr><td>Hayabusa</td><td>MITRE ATT&CK-mapped hunt rules for Windows Event Log (4,850 rules)</td></tr>
+          <tr><td>Registry Hunter</td><td>Registry key/value-based persistence and configuration scanning</td></tr>
+          <tr><td>SQLite Hunter</td><td>Scanning SQLite-based artifacts like browser history and messaging DBs</td></tr>
+          <tr><td>Rapid7 Labs</td><td>Additional hunt and triage artifacts produced by Velocidex/Rapid7</td></tr>
+          <tr><td>Artifact Exchange</td><td>Community-contributed artifact repository</td></tr>
+        </tbody>
+      </table>
+    </div>
+
+    <div class="callout success">
+      <span class="callout-icon">✓</span>
+      <div class="callout-body">
+        <strong>Why Import This Before Agent Deployment?</strong>
+        This step was done before rolling out agents because artifacts like <code>Windows.Hayabusa.Rules</code> ship in this bundle. The artifacts need to already be on the server so the MITRE ATT&CK hunt can run as soon as the agent fleet is up.
+      </div>
+    </div>
+  </div>
+
+  <!-- STEP 3: WINDOWS AGENT DEPLOYMENT -->
+  <div class="section">
+    <div class="section-num">Step 03</div>
+    <h2>Windows Agent Deployment — GPO Software Installation</h2>
+
+    <p>The Velociraptor agent is built as an MSI package with the server config embedded inside it. This MSI was deployed to SRV201, SRV202, and CLT601 using the same GPO Software Installation method used for the Sysmon rollout (Chapter 3).</p>
+
+    <h3>1. Building the MSI — Server.Utils.CreateMSI</h3>
+
+    <div class="callout warn">
+      <span class="callout-icon">⚠</span>
+      <div class="callout-body">
+        <strong>Prerequisite: "Materialize Hash"</strong>
+        Before running <code>Server.Utils.CreateMSI</code>, the Windows MSI binary (<code>velociraptor-v0.76.5-windows-amd64.msi</code>) hasn't yet been downloaded into the Tool Inventory and its hash hasn't been computed. The <strong>"Materialize Hash"</strong> button needs to be clicked first — the server downloads the file from GitHub and computes the hash. Skipping this step makes CreateMSI fail with "Tool Hash Unknown."
+      </div>
+    </div>
+
+    <div class="steps">
+      <div class="step">
+        <div class="step-num">1</div>
+        <div class="step-body">
+          <h4>Tool Inventory → Materialize Hash</h4>
+          <p>Wait until the Error and Placeholder panels disappear — ready once "Tool Hash Known" shows up.</p>
+        </div>
+      </div>
+      <div class="step">
+        <div class="step-num">2</div>
+        <div class="step-body">
+          <h4>Build Windows client MSI</h4>
+          <p>Launch the <code>Server.Utils.CreateMSI</code> artifact. Output: a <strong>26 MB</strong> <code>velociraptor-v0.76.5-windows-amd64.msi</code> with the client config baked in.</p>
+        </div>
+      </div>
+      <div class="step">
+        <div class="step-num">3</div>
+        <div class="step-body">
+          <h4>Uploaded Files → Download</h4>
+          <p>Downloaded the MSI and copied it to the software share on SRV202 (<code>C:\Shares\Software\Velociraptor\</code>).</p>
+        </div>
+      </div>
+    </div>
+
+    <h3>2. Verifying the UNC Path</h3>
+
+    <pre><code><span class="label">SRV202 — PowerShell</span>Get-SmbShare | Select-Object Name, Path</code></pre>
+
+    <p>Result:</p>
+
+    <pre><code>\\SRV202\Software\Velociraptor\velociraptor-v0.76.5-windows-amd64.msi</code></pre>
+
+    <h3>3. Creating the GPO — SRV201 (DC)</h3>
+
+    <div class="steps">
+      <div class="step">
+        <div class="step-num">1</div>
+        <div class="step-body">
+          <h4>New GPO</h4>
+          <p>Group Policy Management Console → New GPO → <code>Velociraptor Deployment GPO</code></p>
+        </div>
+      </div>
+      <div class="step">
+        <div class="step-num">2</div>
+        <div class="step-body">
+          <h4>Add the Software Installation Package</h4>
+          <p>Edit → <strong>Computer Configuration → Policies → Software Settings → Software Installation</strong> → right-click → New → Package</p>
+        </div>
+      </div>
+    </div>
+
+    <div class="callout danger">
+      <span class="callout-icon">⚠</span>
+      <div class="callout-body">
+        <strong>Type the UNC Path Directly — Don't Use Browse</strong>
+        On the package screen, type the UNC path directly into the address bar:<br>
+        <code>\\SRV202\Software\Velociraptor\velociraptor-v0.76.5-windows-amd64.msi</code><br>
+        Browsing to it returns a local path instead — GPO can't find that path on target machines. After Open, <strong>Assigned</strong> was selected as the deployment method.
+      </div>
+    </div>
+
+    <h3>4. Linking and Applying the GPO</h3>
+
+    <p>The GPO was linked to the Servers OU and the Clients OU — the same OU structure as the Sysmon Deployment GPO, kept as its own dedicated GPO (not folded into Default Domain Policy).</p>
+
+    <div class="callout warn">
+      <span class="callout-icon">⚠</span>
+      <div class="callout-body">
+        <strong>gpupdate /force Isn't Enough</strong>
+        Software Installation policies (as seen with Sysmon too) only apply at machine startup. <code>gpupdate /force</code> doesn't trigger the MSI install — a <strong>reboot is required</strong>.
+      </div>
+    </div>
+
+    <h3>Result — Agent Fleet</h3>
+
+    <div class="table-wrap">
+      <table>
+        <thead><tr><th>Machine</th><th>IP</th><th>Status</th><th>Note</th></tr></thead>
+        <tbody>
+          <tr><td>SRV201</td><td>10.1.20.10</td><td class="ok">● Connected</td><td>Auto-installed via GPO + reboot</td></tr>
+          <tr><td>SRV202</td><td>10.1.20.11</td><td class="ok">● Connected</td><td>Auto-installed via GPO + reboot</td></tr>
+          <tr><td>CLT601</td><td>10.1.60.10</td><td class="ok">● Connected</td><td>Auto-installed via GPO + reboot</td></tr>
+          <tr><td>Linux SOC VMs</td><td>10.1.30.x</td><td>— Skipped</td><td>Design decision — see note below</td></tr>
+          <tr><td>Kali</td><td>10.1.70.10</td><td>— Excluded</td><td>Attacker VM, out of agent scope</td></tr>
+        </tbody>
+      </table>
+    </div>
+
+    <div class="callout info">
+      <span class="callout-icon">ℹ</span>
+      <div class="callout-body">
+        <strong>Why No Agent on the Linux SOC VMs?</strong>
+        The SOC tool VMs in this lab (Wazuh, Shuffle, TheHive, Cortex) already have their own monitoring/logging mechanisms and are watched by the Wazuh agent. The focus of DFIR hunting — just as in the real world — is on user and server endpoints (domain-joined Windows machines). This is a deliberate scoping decision, not a missing step.
+      </div>
+    </div>
+  </div>
+
+  <!-- STEP 4: FLEET HUNTING -->
+  <div class="section">
+    <div class="section-num">Step 04</div>
+    <h2>Fleet Hunting — Baseline Forensic Sweep</h2>
+
+    <p>Once the agent fleet was up, six baseline DFIR hunts were sent to the three endpoints (SRV201, SRV202, CLT601) in turn. Each hunt was launched by selecting the artifact from Hunt Manager → New Hunt and dispatching it to all 3 clients; once complete, results were queried with VQL in a Notebook.</p>
+
+    <h3>1. Unsigned Process Sweep — Windows.System.Pslist</h3>
+
+    <pre><code><span class="label">VQL</span><span class="k">SELECT</span> Fqdn, Name, Exe, Authenticode.Trusted <span class="k">AS</span> Trusted, Hash.SHA256 <span class="k">AS</span> SHA256
+<span class="k">FROM</span> source(artifact=<span class="s">"Windows.System.Pslist"</span>)
+<span class="k">WHERE</span> Authenticode.Trusted != <span class="s">"trusted"</span> <span class="k">AND</span> Exe != <span class="s">""</span>
+<span class="k">ORDER BY</span> Fqdn</code></pre>
+
+    <p>Result: <span class="ok">Clean.</span> The only unsigned group that showed up was Proxmox's own VirtIO guest drivers (balloon, vioscsi, netkvm) — the virtualization layer's own drivers, expected and legitimate.</p>
+
+    <h3>2. Network Connections — Windows.Network.Netstat (C2 Check)</h3>
+
+    <pre><code><span class="label">VQL</span><span class="k">SELECT</span> Pid, Name, Status, Laddr.IP, Laddr.Port, Raddr.IP, Raddr.Port
+<span class="k">FROM</span> source(artifact=<span class="s">"Windows.Network.Netstat"</span>)
+<span class="k">WHERE</span> Status = <span class="s">"ESTABLISHED"</span> <span class="k">AND</span> Raddr.IP != <span class="s">"0.0.0.0"</span></code></pre>
+
+    <p>Result: <span class="ok">Clean.</span> Every ESTABLISHED connection was accounted for — AD/DNS traffic (SRV201↔SRV202), Wazuh agent → Manager (10.1.30.10:1514), Velociraptor agent → Frontend (10.1.30.14:8000). No unexpected external IPs.</p>
+
+    <h3>3. Persistence — Windows.Packs.Persistence</h3>
+
+    <p>A sweep of WMI event subscriptions and the Startup folder. Result: <span class="ok">Clean</span> — no unauthorized WMI persistence or startup entries found.</p>
+
+    <h3>4. Scheduled Tasks — Windows.System.TaskScheduler</h3>
+
+    <p>Result: <span class="ok">Clean.</span> Every task was accounted for by GPO deployment scripts (Sysmon, Velociraptor) and Wazuh SCA's periodic check tasks.</p>
+
+    <h3>5. Services — Windows.System.Services</h3>
+
+    <pre><code><span class="label">VQL — whitelist approach</span><span class="k">SELECT</span> ClientId, Name, DisplayName, State, StartMode, PathName, UserAccount
+<span class="k">FROM</span> source(artifact=<span class="s">"Windows.System.Services"</span>)
+<span class="k">WHERE</span> PathName != <span class="s">""</span>
+  <span class="k">AND NOT</span> PathName =~ <span class="s">"(?i)(\\\\windows\\\\|program files|programdata\\\\microsoft|\\\\sysmon)"</span></code></pre>
+
+    <p>A query for anything outside known-good path patterns (Windows, Program Files, Microsoft ProgramData, Sysmon). Result: <span class="ok">Clean</span> — the remaining services were the Velociraptor agent itself and previously known third-party software (the Proxmox guest agent, etc.).</p>
+
+    <h3>6. Prefetch Analysis — Windows.Forensics.Prefetch</h3>
+
+    <pre><code><span class="label">VQL</span><span class="k">SELECT</span> ClientId, Executable, LastRunTimes, RunCount, PrefetchFileName
+<span class="k">FROM</span> source(artifact=<span class="s">"Windows.Forensics.Prefetch"</span>)
+<span class="k">WHERE</span> Executable =~ <span class="s">"(?i)(powershell|cmd|wscript|cscript|mshta|rundll32|regsvr32|certutil|bitsadmin|net\.exe|whoami|mimikatz|psexec)"</span>
+<span class="k">ORDER BY</span> ClientId</code></pre>
+
+    <div class="callout info">
+      <span class="callout-icon">ℹ</span>
+      <div class="callout-body">
+        <strong>Why Are All Results From CLT601?</strong>
+        Prefetch is <strong>disabled by default</strong> on Windows server SKUs — that's why nothing came back from SRV201 or SRV202. CLT601 (Windows 11 Enterprise, a client SKU) keeps prefetch on; every result comes from there.
+      </div>
+    </div>
+
+    <div class="table-wrap">
+      <table>
+        <thead><tr><th>Executable</th><th>RunCount</th><th>Assessment</th></tr></thead>
+        <tbody>
+          <tr><td>CMD.EXE</td><td><strong>1526</strong></td><td>Very high — accounted for by GPO scripts and Wazuh's .bat wrappers</td></tr>
+          <tr><td>POWERSHELL.EXE</td><td><strong>51 + 40 = 91</strong></td><td>Two separate prefetch entries = two different argument sets — Sysmon/Velociraptor/Wazuh GPO deployments</td></tr>
+          <tr><td>NET.EXE</td><td><strong>37</strong></td><td>Could indicate reconnaissance — investigated further below</td></tr>
+          <tr><td>RUNDLL32.EXE</td><td><strong>16 + 2 + 35 = 53</strong></td><td>3 different prefetch entries = 3 different DLL calls — overlaps with Scheduled Tasks</td></tr>
+          <tr><td>MPCMDRUN.EXE</td><td><strong>86 + 95 = 181</strong></td><td>Windows Defender scanner — legitimate</td></tr>
+        </tbody>
+      </table>
+    </div>
+
+    <h3>Tracking NET.EXE — Sysmon Event ID 1</h3>
+
+    <p>NET.EXE's 37 executions were investigated further, since commands like <code>net user</code> and <code>net group</code> can be used for reconnaissance. Prefetch only answers "did it run?" — answering "when, by whom, with what arguments, called from which process?" requires Sysmon Event ID 1 (Process Creation).</p>
+
+    <div class="key-insight">
+      <p>"Prefetch only answers 'did it run?' Sysmon Event ID 1 answers 'when, by whom, with what arguments, called from which process?' — that's why it's the reference log source in IR playbooks and MITRE ATT&CK detections."</p>
+    </div>
+
+    <p>The Sysmon EID 1 review confirmed the NET.EXE executions came from periodic <code>net user</code> commands triggered by <code>wazuh-agent.exe</code> (the Wazuh SCA module's user/account policy checks). <span class="ok">Result: accounted for, no threat.</span></p>
+  </div>
+
+  <!-- STEP 5: HAYABUSA -->
+  <div class="section">
+    <div class="section-num">Step 05</div>
+    <h2>MITRE ATT&CK Hunt — Hayabusa</h2>
+
+    <p>The hunts in Step 04 looked at specific artifact types. This step runs <code>Windows.Hayabusa.Rules</code>, scanning every Windows Event Log across the fleet against 4,850 Sigma-based MITRE ATT&CK rules — <strong>over 66,000 events</strong> processed.</p>
+
+    <pre><code><span class="label">VQL — summary, by unique title</span><span class="k">SELECT</span> Fqdn, Title, Level
+<span class="k">FROM</span> source(artifact=<span class="s">"Windows.Hayabusa.Rules"</span>)
+<span class="k">WHERE</span> Fqdn =~ <span class="s">"SRV"</span>
+  <span class="k">AND</span> Level != <span class="s">"informational"</span>
+  <span class="k">AND</span> Level != <span class="s">"low"</span>
+<span class="k">GROUP BY</span> Title, Fqdn, Level
+<span class="k">ORDER BY</span> Level <span class="k">DESC</span></code></pre>
+
+    <h3>🔴 High-Severity Findings</h3>
+
+    <div class="table-wrap">
+      <table>
+        <thead><tr><th>Alert</th><th>SRV201</th><th>SRV202</th><th>Status</th></tr></thead>
+        <tbody>
+          <tr><td>PUA - Suspicious AD Enumeration Via AdFind.EXE</td><td>✅</td><td>✅</td><td class="ok">Accounted for — below</td></tr>
+          <tr><td>Windows Defender Real-time Protection Disabled</td><td>✅</td><td>—</td><td class="ok">Accounted for — below</td></tr>
+          <tr><td>Windows Defender Threat Detection Disabled</td><td>✅</td><td>—</td><td class="ok">Accounted for — below</td></tr>
+          <tr><td>Proc Access (Sysmon Alert)</td><td>✅</td><td>✅</td><td class="ok">Sysmon EID 10 — Wazuh/Velociraptor agent behavior</td></tr>
+          <tr><td>Scheduled TaskCache Change by Uncommon Program</td><td>✅</td><td>✅</td><td class="ok">GPO deployment-related</td></tr>
+          <tr><td>Service Binary in Suspicious Folder</td><td>✅</td><td>—</td><td class="ok">Velociraptor/Sysmon install directories</td></tr>
+          <tr><td>Suspicious Service Path</td><td>✅</td><td>—</td><td class="ok">Same install directories</td></tr>
+        </tbody>
+      </table>
+    </div>
+
+    <h3>🟡 Notable Medium-Severity Findings</h3>
+
+    <ul class="checklist">
+      <li>Hidden Executable In NTFS Alternate Data Stream — SRV202</li>
+      <li>WMI Persistence — both servers</li>
+      <li>NTLMv1 Logon — both servers (a security downgrade — a known artifact of the lab's AD configuration)</li>
+      <li>Potential Process Hollowing Activity — both servers</li>
+    </ul>
+
+    <p>The medium-severity findings were left out of scope for this round — the three high-priority categories (AdFind, Defender disabled, and the related Sysmon/service alerts) were investigated; the remaining medium findings will be handled in a future hunt pass.</p>
+
+    <h3>Investigation 1 — AdFind.EXE Enumeration (False Positive)</h3>
+
+    <p>Initial hypothesis: an attacker or tool might genuinely have run AdFind.exe. A direct search was run against Sysmon EID 1:</p>
+
+    <pre><code><span class="label">VQL — first attempt</span><span class="k">SELECT</span> Fqdn, TimeCreated, EventData.Image <span class="k">AS</span> Image,
+       EventData.CommandLine <span class="k">AS</span> CommandLine,
+       EventData.ParentImage <span class="k">AS</span> ParentImage,
+       EventData.User <span class="k">AS</span> User
+<span class="k">FROM</span> source(artifact=<span class="s">"Windows.EventLogs.Evtx"</span>)
+<span class="k">WHERE</span> Channel = <span class="s">"Microsoft-Windows-Sysmon/Operational"</span>
+  <span class="k">AND</span> EventID = <span class="v">1</span>
+  <span class="k">AND</span> EventData.Image =~ <span class="s">"(?i)adfind"</span>
+<span class="k">ORDER BY</span> TimeCreated <span class="k">DESC</span></code></pre>
+
+    <p>Result: <code>table contains no data</code> — no process named adfind.exe had ever run. So Hayabusa's own trigger detail was checked instead:</p>
+
+    <pre><code><span class="label">VQL — Hayabusa detail</span><span class="k">SELECT</span> Fqdn, Timestamp, Title, Level, Channel, EID, Details
+<span class="k">FROM</span> source(artifact=<span class="s">"Windows.Hayabusa.Rules"</span>)
+<span class="k">WHERE</span> Title =~ <span class="s">"AdFind"</span>
+<span class="k">ORDER BY</span> Timestamp <span class="k">DESC</span></code></pre>
+
+    <p>Mystery solved. Every alert traced back to the same actual command line:</p>
+
+    <pre><code><span class="label">The actual command — parent: wazuh-agent.exe</span>powershell secedit /export /cfg $env:TEMP\secpol.cfg;
+Get-Content $env:TEMP\secpol.cfg | Select-String "LockoutDuration";
+Remove-Item $env:TEMP\secpol.cfg</code></pre>
+
+    <div class="callout success">
+      <span class="callout-icon">✓</span>
+      <div class="callout-body">
+        <strong>Result: False Positive</strong>
+        This is the <code>secedit /export</code> command Wazuh's SCA (Security Configuration Assessment) module runs periodically to check the <code>LockoutDuration</code> policy. The Sigma rule mistakenly matched this command pattern to an AD-enumeration signature (an argument structure resembling AdFind). The parent process on every line is <code>wazuh-agent.exe</code> — not attacker activity.
+      </div>
+    </div>
+
+    <h3>Investigation 2 — Windows Defender Disabled (the Czech-Language Mystery)</h3>
+
+    <p>The event message for the HIGH-severity "Windows Defender Real-time Protection Disabled" alert triggered by EID 5001 on SRV201 came back in <strong>Czech</strong>. Initial hypothesis: the system may have originally been installed with a Czech locale before being switched to Turkish — a leftover trace from the Windows Server ISO/template used for provisioning.</p>
+
+    <pre><code><span class="label">SRV201 — PowerShell</span>Get-WinSystemLocale        <span class="c"># → Turkish</span>
+Get-WinUserLanguageList     <span class="c"># → only Turkish installed</span></code></pre>
+
+    <p>The result was unexpected: the Czech language pack was found to have <em>never</em> been present — only Turkish was installed. The "used to be Czech, later removed" hypothesis was then tested via web research:</p>
+
+    <div class="callout info">
+      <span class="callout-icon">ℹ</span>
+      <div class="callout-body">
+        <strong>Web Research Finding</strong>
+        There's a documented bug — known since 2018 — in Windows Defender's MUI (Multilingual User Interface) resource files that causes event messages to show up in Czech or Polish regardless of the system's actual language. The same behavior has been reported on German systems too. SRV201's case matches this bug exactly: system locale is Turkish, only the Turkish language pack is installed, but the Defender message comes out in Czech.
+      </div>
+    </div>
+
+    <p>The Turkish translation of the Czech message reads: <em>"Real-time protection has disabled scanning for malware and other potentially unwanted software."</em></p>
+
+    <div class="callout success">
+      <span class="callout-icon">✓</span>
+      <div class="callout-body">
+        <strong>Result: Accounted For</strong>
+        The Defender-disabled event is real but was a one-off — tied to the lab setup process on June 1st (a temporary Defender exclusion during the Sysmon/Velociraptor agent installs). The Czech language wasn't the originally suspected "used to run a Czech locale" — it's a known Windows Defender MUI bug. No threat here; this investigation started as an "infer system history from event-log language" exercise and ended up identifying a product-specific MUI bug instead — a common turn of events in DFIR work.
+      </div>
+    </div>
+  </div>
+
+  <!-- KNOWN ISSUES -->
+  <div class="section">
+    <div class="section-num">Troubleshooting</div>
+    <h2>Problems Hit During Setup</h2>
+
+    <div class="table-wrap">
+      <table>
+        <thead><tr><th>Problem</th><th>Root Cause</th><th>Fix</th></tr></thead>
+        <tbody>
+          <tr>
+            <td>Can't build a <code>debian server</code> package with v0.76.6</td>
+            <td>A known version-specific bug</td>
+            <td class="ok">Used v0.76.5 instead</td>
+          </tr>
+          <tr>
+            <td>Agents can't connect to the Frontend (8000), GUI unreachable from outside</td>
+            <td>The config wizard default is <code>bind_address: 127.0.0.1</code></td>
+            <td class="ok">Manually changed to <code>0.0.0.0</code> for both Frontend and GUI</td>
+          </tr>
+          <tr>
+            <td><code>Server.Utils.CreateMSI</code> fails with "Tool Hash Unknown"</td>
+            <td>The Windows MSI binary hadn't yet been downloaded into the Tool Inventory</td>
+            <td class="ok">Computed the hash first with "Materialize Hash"</td>
+          </tr>
+          <tr>
+            <td>Can't find the UNC path on the GPO Package screen</td>
+            <td>Browsing to it returns a local path instead</td>
+            <td class="ok">Typed the UNC path (<code>\\SRV202\...</code>) directly into the address bar</td>
+          </tr>
+          <tr>
+            <td>The agent install doesn't happen even after a reboot (first attempt)</td>
+            <td><code>gpupdate /force</code> doesn't trigger Software Installation policies</td>
+            <td class="ok">A full reboot triggered the MSI install automatically</td>
+          </tr>
+          <tr>
+            <td>No prefetch data comes from SRV201/SRV202</td>
+            <td>Prefetch is off by default on Windows server SKUs</td>
+            <td class="ok">Expected behavior — analysis was done via CLT601 instead</td>
+          </tr>
+          <tr>
+            <td>"AdFind enumeration" HIGH alert — a real attack?</td>
+            <td>Wazuh SCA's <code>secedit /export</code> command was mismatched to an AdFind pattern by the Sigma rule</td>
+            <td class="ok">Confirmed as a false positive via Sysmon EID 1 + the Hayabusa trigger detail</td>
+          </tr>
+          <tr>
+            <td>The "Defender Disabled" alert message is in Czech — does that mean a suspicious system history?</td>
+            <td>A known Windows Defender MUI bug (documented since 2018) — the message can show up in Czech even on a Turkish-language system</td>
+            <td class="ok">Confirmed the bug via Get-WinSystemLocale/Get-WinUserLanguageList plus web research; the event traced back to the June 1st lab setup process</td>
+          </tr>
+          <tr>
+            <td>37 NET.EXE runs in prefetch — suspected reconnaissance</td>
+            <td>Wazuh SCA's periodic <code>net user</code> check</td>
+            <td class="ok">Confirmed the <code>wazuh-agent.exe</code> parent process via Sysmon EID 1</td>
+          </tr>
+        </tbody>
+      </table>
+    </div>
+  </div>
+
+  <!-- SUMMARY -->
+  <div class="section">
+    <div class="section-num">Summary</div>
+    <h2>What Was Built, What's Running?</h2>
+
+    <div class="table-wrap">
+      <table>
+        <thead><tr><th>Component</th><th>Detail</th><th>Status</th></tr></thead>
+        <tbody>
+          <tr><td>Velociraptor Server</td><td>v0.76.5 · Ubuntu 24.04 · 10.1.30.14:8889 (GUI) / :8000 (Frontend)</td><td class="ok">● Active</td></tr>
+          <tr><td>Extra Artifacts</td><td>359 bundles — Sigma, Hayabusa, Registry Hunter, SQLite Hunter, Rapid7 Labs, Artifact Exchange</td><td class="ok">● Imported</td></tr>
+          <tr><td>Windows Agent Fleet</td><td>SRV201, SRV202, CLT601 — GPO Software Installation</td><td class="ok">● Connected (3/3)</td></tr>
+          <tr><td>Baseline DFIR hunts</td><td>Pslist · Netstat · Persistence · TaskScheduler · Services · Prefetch</td><td class="ok">● Complete — clean</td></tr>
+          <tr><td>MITRE ATT&CK hunt</td><td>Windows.Hayabusa.Rules — 4,850 rules / 66K+ events</td><td class="ok">● Complete</td></tr>
+          <tr><td>HIGH severity findings</td><td>AdFind (FP) · Defender Disabled (MUI bug + one-off) · others GPO/agent-related</td><td class="ok">● All findings accounted for</td></tr>
+          <tr><td>Proxmox snapshot</td><td>Taken after Velociraptor install + agent deployment + hunt analysis</td><td class="ok">● Taken</td></tr>
+        </tbody>
+      </table>
+    </div>
+
+    <div class="callout info">
+      <span class="callout-icon">→</span>
+      <div class="callout-body">
+        <strong>Deferred: The Velociraptor ↔ Shuffle Automated IR Chain</strong>
+        The intended final link — Kali port scan → Wazuh → Shuffle → automated Velociraptor artifact collection → attached to a TheHive case — wasn't built in this chapter. Reason: across this lab, Wazuh→Shuffle communication runs over plaintext HTTP, and SSL verification is disabled on the Shuffle→OPNsense/TheHive connections. Before adding API integrations to this chain, an internal PKI needs to be stood up so that all inter-service communication moves to HTTPS with a valid certificate. That work is planned as a separate phase of the project.
+      </div>
+    </div>
+  </div>
+
+  <!-- ROADMAP -->
+  <div class="section">
+    <div class="section-num">What's Next?</div>
+    <h2>Project Roadmap</h2>
+
+    <ul class="checklist">
+      <li>Proxmox installation and base virtualization infrastructure <span class="badge done">Complete</span></li>
+      <li>VLAN segmentation and firewall rules with OPNsense <span class="badge done">Complete</span></li>
+      <li>Active Directory Domain Services and GPO configuration <span class="badge done">Complete</span></li>
+      <li>Wazuh Manager installation, Sysmon GPO deployment, FIM configuration <span class="badge done">Complete</span></li>
+      <li>Suricata IPS integration — Netmap mode, active blocking <span class="badge done">Complete</span></li>
+      <li>Automated response workflows with Shuffle SOAR <span class="badge done">Complete</span></li>
+      <li>TheHive + Cortex — case management and enrichment <span class="badge done">Complete</span></li>
+      <li>Velociraptor — digital forensics and incident response <span class="badge done">Complete</span></li>
+      <li>MISP / OpenCTI (threat intelligence)</li>
+      <li>Grafana (dashboards)</li>
+      <li>OpenVAS / Greenbone (vulnerability management)</li>
+      <li>Atomic Red Team / Caldera (attack simulation)</li>
+    </ul>
+  </div>
+
+  <div class="series-nav">
+    <div class="series-nav-label">SOC Lab Series — All Chapters</div>
+    <div class="series-nav-links">
+      <div class="series-nav-item"><span class="num">01</span><a href="#">Proxmox Installation, VM Configuration, and Remote Access →</a></div>
+      <div class="series-nav-item"><span class="num">02</span><a href="#">VLAN Segmentation with OPNsense and Active Directory →</a></div>
+      <div class="series-nav-item"><span class="num">03</span><a href="#">Centralized Security Monitoring with Wazuh, Sysmon, and FIM →</a></div>
+      <div class="series-nav-item"><span class="num">04</span><a href="#">Suricata IDS/IPS Integration →</a></div>
+      <div class="series-nav-item"><span class="num">05</span><a href="#">Automated Response with Shuffle SOAR →</a></div>
+      <div class="series-nav-item"><span class="num">06</span><a href="#">TheHive + Cortex — Case Management and Enrichment →</a></div>
+      <div class="series-nav-item current"><span class="num">07</span>Velociraptor — Digital Forensics and Incident Response</div>
+    </div>
+  </div>
+
+</div>
+</div>
+
+<div class="footer">
+  <p style="margin-bottom:8px"><strong>SOC Lab Series</strong> · Chapter 7 — Velociraptor</p>
+  <p>Velociraptor v0.76.5 · Ubuntu 24.04 · GPO Software Installation · Hayabusa 4,850 rules</p>
+</div>
+
+</body>
+</html>
