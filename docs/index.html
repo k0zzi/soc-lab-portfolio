@@ -1,0 +1,250 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>SOC Lab Series — Build Documentation</title>
+<style>
+  @import url('https://fonts.googleapis.com/css2?family=Merriweather:ital,wght@0,300;0,400;0,700;1,300;1,400&family=Source+Code+Pro:wght@400;600&family=Inter:wght@400;500;600;700&display=swap');
+
+  *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+
+  :root {
+    --black: #0d0d0d;
+    --dark: #1a1a1a;
+    --mid: #2d2d2d;
+    --border: #2a2a2a;
+    --text: #e8e8e8;
+    --muted: #888;
+    --accent: #00ff88;
+    --accent2: #00c4ff;
+    --accent3: #ff4d6d;
+    --warn: #ffaa00;
+    --code-bg: #111;
+    --card: #181818;
+  }
+
+  body {
+    background: var(--black);
+    color: var(--text);
+    font-family: 'Merriweather', Georgia, serif;
+    line-height: 1.7;
+    -webkit-font-smoothing: antialiased;
+  }
+
+  ::selection { background: var(--accent); color: #000; }
+
+  .hero {
+    max-width: 860px;
+    margin: 0 auto;
+    padding: 100px 24px 60px;
+    text-align: center;
+  }
+  .hero-tag {
+    font-family: 'Inter', sans-serif;
+    font-size: 12px;
+    font-weight: 700;
+    letter-spacing: 2px;
+    text-transform: uppercase;
+    color: var(--accent);
+    margin-bottom: 20px;
+  }
+  .hero h1 {
+    font-size: 42px;
+    line-height: 1.25;
+    font-weight: 700;
+    margin-bottom: 20px;
+  }
+  .hero h1 span { color: var(--accent); }
+  .hero-sub {
+    font-family: 'Inter', sans-serif;
+    font-size: 16px;
+    color: #bbb;
+    max-width: 620px;
+    margin: 0 auto 24px;
+    line-height: 1.7;
+  }
+  .hero-meta {
+    font-family: 'Inter', sans-serif;
+    font-size: 13px;
+    color: var(--muted);
+  }
+  .hero-meta .dot { margin: 0 10px; color: var(--mid); }
+  .hero-meta a { color: var(--accent2); text-decoration: none; }
+  .hero-meta a:hover { text-decoration: underline; }
+
+  .container { max-width: 860px; margin: 0 auto; padding: 0 24px 100px; }
+
+  .note {
+    font-family: 'Inter', sans-serif;
+    font-size: 14px;
+    line-height: 1.65;
+    color: #bbb;
+    background: var(--card);
+    border: 1px solid var(--border);
+    border-left: 3px solid var(--accent2);
+    border-radius: 4px;
+    padding: 18px 22px;
+    margin-bottom: 48px;
+  }
+  .note strong { color: var(--text); }
+
+  .chapter-list {
+    list-style: none;
+    display: flex;
+    flex-direction: column;
+    gap: 14px;
+  }
+  .chapter-item {
+    display: block;
+    background: var(--card);
+    border: 1px solid var(--border);
+    border-radius: 6px;
+    padding: 22px 26px;
+    text-decoration: none;
+    color: var(--text);
+    transition: border-color 0.15s ease, transform 0.15s ease;
+  }
+  .chapter-item:hover {
+    border-color: var(--accent);
+    transform: translateX(2px);
+  }
+  .chapter-head {
+    display: flex;
+    align-items: baseline;
+    gap: 14px;
+    margin-bottom: 8px;
+  }
+  .chapter-num {
+    font-family: 'Source Code Pro', monospace;
+    font-size: 13px;
+    font-weight: 600;
+    color: var(--accent);
+    flex-shrink: 0;
+  }
+  .chapter-title {
+    font-family: 'Inter', sans-serif;
+    font-size: 17px;
+    font-weight: 700;
+    color: var(--text);
+  }
+  .chapter-desc {
+    font-family: 'Inter', sans-serif;
+    font-size: 14px;
+    color: #999;
+    line-height: 1.6;
+    padding-left: 30px;
+  }
+
+  footer {
+    max-width: 860px;
+    margin: 0 auto;
+    padding: 40px 24px 80px;
+    font-family: 'Inter', sans-serif;
+    font-size: 13px;
+    color: var(--muted);
+    text-align: center;
+    border-top: 1px solid var(--border);
+    margin-top: 40px;
+  }
+  footer a { color: var(--accent2); text-decoration: none; }
+  footer a:hover { text-decoration: underline; }
+
+  @media (max-width: 600px) {
+    .hero { padding: 60px 20px 40px; }
+    .hero h1 { font-size: 30px; }
+    .chapter-desc { padding-left: 0; margin-top: 4px; }
+  }
+</style>
+</head>
+<body>
+
+<div class="hero">
+  <div class="hero-tag">SOC Lab Series</div>
+  <h1>Building a <span>SOC Lab</span> From Scratch</h1>
+  <p class="hero-sub">A self-hosted Security Operations Center lab on Proxmox — network segmentation, endpoint telemetry, IDS/IPS, SOAR automation, case management, and digital forensics, built and verified end-to-end against live traffic.</p>
+  <div class="hero-meta">
+    7 chapters · <a href="https://github.com/k0zzi/soc-lab-portfolio">source on GitHub</a>
+  </div>
+</div>
+
+<div class="container">
+
+<div class="note">
+  <strong>A note on this series.</strong> This is not a tutorial — it documents real decisions, real bugs found and fixed, and real live-traffic verification for a personal SOC lab. Lab-internal IP addresses (RFC1918, 10.1.x.x) are left intact; all credentials and webhook identifiers are redacted.
+</div>
+
+<ul class="chapter-list">
+  <li>
+    <a class="chapter-item" href="01-proxmox-setup.html">
+      <div class="chapter-head">
+        <span class="chapter-num">01</span>
+        <span class="chapter-title">Proxmox Installation, VM Configuration, and Remote Access</span>
+      </div>
+      <div class="chapter-desc">From a bare-metal machine to a virtual lab environment: Proxmox installation, disk configuration, Windows and Ubuntu VMs, and secure remote access.</div>
+    </a>
+  </li>
+  <li>
+    <a class="chapter-item" href="02-opnsense-ad.html">
+      <div class="chapter-head">
+        <span class="chapter-num">02</span>
+        <span class="chapter-title">VLAN Segmentation with OPNsense and Active Directory</span>
+      </div>
+      <div class="chapter-desc">Firewall deployment, VLAN-based network segmentation, and a Windows Server Active Directory domain.</div>
+    </a>
+  </li>
+  <li>
+    <a class="chapter-item" href="03-wazuh-sysmon-fim.html">
+      <div class="chapter-head">
+        <span class="chapter-num">03</span>
+        <span class="chapter-title">Centralized Security Monitoring with Wazuh, Sysmon, and FIM</span>
+      </div>
+      <div class="chapter-desc">Deploying Wazuh as the SIEM core, Sysmon-based endpoint telemetry, and file integrity monitoring.</div>
+    </a>
+  </li>
+  <li>
+    <a class="chapter-item" href="04-suricata-ids-ips.html">
+      <div class="chapter-head">
+        <span class="chapter-num">04</span>
+        <span class="chapter-title">Suricata IDS/IPS Integration</span>
+      </div>
+      <div class="chapter-desc">Network-based intrusion detection with Suricata, rule tuning, and Wazuh integration.</div>
+    </a>
+  </li>
+  <li>
+    <a class="chapter-item" href="05-shuffle-soar.html">
+      <div class="chapter-head">
+        <span class="chapter-num">05</span>
+        <span class="chapter-title">Shuffle SOAR Automation</span>
+      </div>
+      <div class="chapter-desc">SOAR workflows correlating Wazuh alerts against MISP threat intelligence, with deduplication and fail-closed error handling.</div>
+    </a>
+  </li>
+  <li>
+    <a class="chapter-item" href="06-thehive-cortex.html">
+      <div class="chapter-head">
+        <span class="chapter-num">06</span>
+        <span class="chapter-title">TheHive and Cortex Case Management</span>
+      </div>
+      <div class="chapter-desc">Incident triage and case management with TheHive, enriched by Cortex analyzers.</div>
+    </a>
+  </li>
+  <li>
+    <a class="chapter-item" href="07-velociraptor-dfir.html">
+      <div class="chapter-head">
+        <span class="chapter-num">07</span>
+        <span class="chapter-title">Velociraptor Digital Forensics</span>
+      </div>
+      <div class="chapter-desc">Endpoint DFIR with Velociraptor — artifact collection, live investigation, and a real false-positive case study.</div>
+    </a>
+  </li>
+</ul>
+
+</div>
+
+<footer>
+  <a href="https://github.com/k0zzi/soc-lab-portfolio">soc-lab-portfolio on GitHub</a> · <a href="https://www.linkedin.com/in/mekeser/">LinkedIn</a>
+</footer>
+
+</body>
+</html>
