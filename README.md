@@ -8,6 +8,8 @@ This repository is not a tutorial. It documents real decisions, real
 bugs found and fixed, and real live-traffic verification — the goal is
 to show how the system was reasoned about, not just that it runs.
 
+**📄 Live documentation: [k0zzi.github.io/soc-lab-portfolio](https://k0zzi.github.io/soc-lab-portfolio/)**
+
 ## Scope
 
 - **SIEM**: Wazuh (Sysmon-based endpoint telemetry, Suricata IDS/IPS
@@ -42,4 +44,5 @@ used alongside gitleaks CI.
 
 ## Status
 
-Work in progress. See `docs/` for completed build steps.
+Work in progress. See the [live documentation](https://k0zzi.github.io/soc-lab-portfolio/)
+or the `docs/` folder for completed build steps.
