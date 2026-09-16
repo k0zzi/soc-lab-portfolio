@@ -1,0 +1,754 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Building a SOC Lab From Scratch: MISP — Threat Intelligence and IOC Correlation</title>
+<style>
+  @import url('https://fonts.googleapis.com/css2?family=Merriweather:ital,wght@0,300;0,400;0,700;1,300;1,400&family=Source+Code+Pro:wght@400;600&family=Inter:wght@400;500;600;700&display=swap');
+
+  *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+
+  :root {
+    --black: #0d0d0d;
+    --dark: #1a1a1a;
+    --mid: #2d2d2d;
+    --border: #2a2a2a;
+    --text: #e8e8e8;
+    --muted: #888;
+    --accent: #00ff88;
+    --accent2: #00c4ff;
+    --accent3: #ff4d6d;
+    --warn: #ffaa00;
+    --code-bg: #111;
+    --card: #181818;
+  }
+
+  body { background: var(--black); color: var(--text); font-family: 'Merriweather', Georgia, serif; font-size: 18px; line-height: 1.85; -webkit-font-smoothing: antialiased; }
+
+  .hero { background: linear-gradient(135deg, #0a0a0a 0%, #0d1a12 50%, #0a0f1a 100%); border-bottom: 1px solid var(--border); padding: 80px 24px 60px; text-align: center; position: relative; overflow: hidden; }
+  .hero::before { content: ''; position: absolute; inset: 0; background: radial-gradient(ellipse at 50% 0%, rgba(0,255,136,0.08) 0%, transparent 70%); pointer-events: none; }
+  .hero-tag { display: inline-block; font-family: 'Inter', sans-serif; font-size: 11px; font-weight: 600; letter-spacing: 3px; text-transform: uppercase; color: var(--accent); border: 1px solid rgba(0,255,136,0.3); padding: 4px 14px; border-radius: 2px; margin-bottom: 28px; }
+  .hero h1 { font-family: 'Merriweather', serif; font-size: clamp(28px, 5vw, 52px); font-weight: 700; line-height: 1.2; max-width: 820px; margin: 0 auto 24px; color: #fff; letter-spacing: -0.5px; }
+  .hero h1 span { color: var(--accent); }
+  .hero-sub { font-family: 'Inter', sans-serif; font-size: 16px; color: var(--muted); max-width: 580px; margin: 0 auto 40px; font-weight: 400; line-height: 1.6; }
+  .hero-meta { display: flex; align-items: center; justify-content: center; gap: 24px; font-family: 'Inter', sans-serif; font-size: 13px; color: var(--muted); flex-wrap: wrap; }
+  .hero-meta .dot { color: var(--border); }
+  .hero-meta strong { color: var(--text); }
+
+  .container { max-width: 740px; margin: 0 auto; padding: 0 24px; }
+  .content { padding: 64px 0 100px; }
+
+  .section-num { font-family: 'Inter', sans-serif; font-size: 11px; font-weight: 700; letter-spacing: 3px; text-transform: uppercase; color: var(--accent); margin-bottom: 8px; }
+  h2 { font-family: 'Merriweather', serif; font-size: 28px; font-weight: 700; color: #fff; margin-bottom: 20px; line-height: 1.3; letter-spacing: -0.3px; }
+  h3 { font-family: 'Inter', sans-serif; font-size: 15px; font-weight: 700; color: var(--accent2); margin: 36px 0 12px; letter-spacing: 0.5px; }
+  h4 { font-family: 'Inter', sans-serif; font-size: 15px; font-weight: 600; color: #ccc; margin: 28px 0 10px; }
+  p { margin-bottom: 24px; color: #ccc; font-weight: 300; }
+  .section { margin: 64px 0; padding-top: 48px; border-top: 1px solid var(--border); }
+
+  pre { background: var(--code-bg); border: 1px solid var(--border); border-left: 3px solid var(--accent); border-radius: 4px; padding: 24px 28px; overflow-x: auto; margin: 28px 0; position: relative; }
+  pre .label { position: absolute; top: 10px; right: 14px; font-family: 'Inter', sans-serif; font-size: 10px; font-weight: 600; letter-spacing: 1.5px; text-transform: uppercase; color: var(--muted); }
+  code { font-family: 'Source Code Pro', 'Courier New', monospace; font-size: 13.5px; line-height: 1.7; color: #e0e0e0; }
+  p code, li code { background: rgba(0,255,136,0.08); color: var(--accent); padding: 2px 7px; border-radius: 3px; font-size: 13px; border: 1px solid rgba(0,255,136,0.15); }
+
+  .c { color: #555; font-style: italic; }
+  .k { color: var(--accent2); }
+  .s { color: #ffd580; }
+  .v { color: var(--accent); }
+  .kw { color: var(--accent3); }
+
+  .callout { border-radius: 4px; padding: 20px 24px; margin: 32px 0; display: flex; gap: 16px; align-items: flex-start; }
+  .callout-icon { font-size: 20px; flex-shrink: 0; margin-top: 2px; }
+  .callout-body { font-family: 'Inter', sans-serif; font-size: 14px; line-height: 1.65; }
+  .callout-body strong { display: block; margin-bottom: 4px; font-size: 13px; letter-spacing: 0.5px; }
+  .callout.info { background: rgba(0,196,255,0.07); border: 1px solid rgba(0,196,255,0.2); color: #a8d8f0; }
+  .callout.info .callout-icon { color: var(--accent2); }
+  .callout.warn { background: rgba(255,170,0,0.07); border: 1px solid rgba(255,170,0,0.2); color: #f0d8a8; }
+  .callout.warn .callout-icon { color: var(--warn); }
+  .callout.success { background: rgba(0,255,136,0.06); border: 1px solid rgba(0,255,136,0.2); color: #a0e8c8; }
+  .callout.success .callout-icon { color: var(--accent); }
+  .callout.danger { background: rgba(255,77,109,0.07); border: 1px solid rgba(255,77,109,0.2); color: #f0a8b8; }
+  .callout.danger .callout-icon { color: var(--accent3); }
+
+  .table-wrap { overflow-x: auto; margin: 28px 0; }
+  table { width: 100%; border-collapse: collapse; font-family: 'Inter', sans-serif; font-size: 13.5px; }
+  th { background: var(--mid); color: var(--accent); font-weight: 600; font-size: 11px; letter-spacing: 1.5px; text-transform: uppercase; padding: 12px 16px; text-align: left; border-bottom: 2px solid var(--accent); }
+  td { padding: 12px 16px; border-bottom: 1px solid var(--border); color: #bbb; vertical-align: top; }
+  tr:last-child td { border-bottom: none; }
+  tr:hover td { background: rgba(255,255,255,0.02); }
+  td:first-child { color: #e0e0e0; font-weight: 500; }
+  .ok { color: var(--accent); font-weight: 600; }
+  .warn-cell { color: var(--warn); font-weight: 600; }
+  .danger-cell { color: var(--accent3); font-weight: 600; }
+
+  .steps { margin: 32px 0; }
+  .step { display: flex; gap: 20px; margin-bottom: 32px; align-items: flex-start; }
+  .step-num { flex-shrink: 0; width: 36px; height: 36px; background: var(--accent); color: #000; border-radius: 50%; display: flex; align-items: center; justify-content: center; font-family: 'Inter', sans-serif; font-weight: 700; font-size: 14px; margin-top: 3px; }
+  .step-body h4 { margin: 0 0 8px; color: #e8e8e8; font-size: 16px; }
+  .step-body p { margin: 0; font-size: 15px; }
+
+  .arch-diagram { background: var(--code-bg); border: 1px solid var(--border); border-radius: 4px; padding: 32px; margin: 32px 0; font-family: 'Source Code Pro', monospace; font-size: 13px; line-height: 1.8; color: #888; text-align: center; }
+  .arch-node { display: inline-block; border: 1px solid var(--accent); color: var(--accent); padding: 6px 16px; border-radius: 3px; font-size: 12px; font-weight: 600; letter-spacing: 1px; }
+  .arch-node.blue { border-color: var(--accent2); color: var(--accent2); }
+  .arch-node.red { border-color: var(--accent3); color: var(--accent3); }
+
+  .vm-card { background: var(--card); border: 1px solid var(--border); border-radius: 4px; padding: 28px; margin: 28px 0; }
+  .vm-card-title { font-family: 'Inter', sans-serif; font-size: 13px; font-weight: 700; letter-spacing: 2px; color: var(--accent); margin-bottom: 20px; padding-bottom: 12px; border-bottom: 1px solid var(--border); }
+  .vm-row { display: flex; justify-content: space-between; align-items: baseline; padding: 8px 0; border-bottom: 1px solid rgba(42,42,42,0.5); font-family: 'Inter', sans-serif; font-size: 14px; }
+  .vm-row:last-child { border-bottom: none; }
+  .vm-row .field { color: var(--muted); }
+  .vm-row .val { color: #e0e0e0; text-align: right; max-width: 60%; }
+  .vm-row .val.white { color: #fff; font-weight: 500; }
+
+  .key-insight { border-left: 3px solid var(--accent); padding: 16px 24px; margin: 32px 0; background: rgba(0,255,136,0.04); }
+  .key-insight p { font-size: 20px; font-style: italic; color: #ddd; margin: 0; line-height: 1.6; font-weight: 300; }
+
+  .badge { display: inline-block; font-family: 'Inter', sans-serif; font-size: 10px; font-weight: 700; letter-spacing: 1px; text-transform: uppercase; padding: 2px 8px; border-radius: 2px; margin-left: 8px; vertical-align: middle; }
+  .badge.done { background: rgba(0,255,136,0.15); color: var(--accent); border: 1px solid rgba(0,255,136,0.3); }
+  .badge.next { background: rgba(0,196,255,0.15); color: var(--accent2); border: 1px solid rgba(0,196,255,0.3); }
+
+  .checklist { list-style: none; margin: 20px 0; }
+  .checklist li { font-family: 'Inter', sans-serif; font-size: 15px; color: #bbb; padding: 10px 0; border-bottom: 1px solid var(--border); display: flex; align-items: center; gap: 12px; }
+  .checklist li:last-child { border-bottom: none; }
+
+  .series-nav { background: var(--card); border: 1px solid var(--border); border-radius: 4px; padding: 24px 28px; margin: 48px 0 0; font-family: 'Inter', sans-serif; }
+  .series-nav-label { font-size: 10px; font-weight: 700; letter-spacing: 2px; text-transform: uppercase; color: var(--muted); margin-bottom: 16px; }
+  .series-nav-links { display: flex; flex-direction: column; gap: 10px; }
+  .series-nav-item { display: flex; align-items: center; gap: 12px; font-size: 14px; color: #bbb; }
+  .series-nav-item .num { font-size: 11px; font-weight: 700; color: var(--accent); width: 24px; flex-shrink: 0; }
+  .series-nav-item.current { color: #fff; font-weight: 600; }
+  .series-nav-item a { color: var(--accent); text-decoration: none; }
+  .series-nav-item a:hover { text-decoration: underline; }
+
+  .footer { border-top: 1px solid var(--border); padding: 48px 24px; text-align: center; font-family: 'Inter', sans-serif; font-size: 13px; color: var(--muted); }
+  .footer strong { color: var(--text); }
+</style>
+</head>
+<body>
+
+<div class="hero">
+  <div class="hero-tag">SOC Lab Series — Chapter 8</div>
+  <h1>Building a <span>SOC Lab</span> From Scratch:<br>MISP — Threat Intelligence and IOC Correlation</h1>
+  <p class="hero-sub">Every other tool in this lab detects or investigates. MISP answers a narrower, more specific question: is this exact indicator already known to be bad? Feed ingestion, a native TheHive sync with a genuinely strange licensing bug, and three Shuffle workflows that turn a threat-intel platform into an active part of the detection pipeline.</p>
+  <div class="hero-meta">
+    <span>~35 min read</span>
+    <span class="dot">·</span>
+    <span>Level: Advanced</span>
+    <span class="dot">·</span>
+    <strong>MISP v2.5.40 · Ubuntu 24.04</strong>
+  </div>
+</div>
+
+<div class="container">
+<div class="content">
+
+  <!-- SERIES NAV -->
+  <div class="series-nav">
+    <div class="series-nav-label">SOC Lab Series</div>
+    <div class="series-nav-links">
+      <div class="series-nav-item"><span class="num">01</span><a href="01-proxmox-setup.html">Proxmox Installation, VM Configuration, and Remote Access →</a></div>
+      <div class="series-nav-item"><span class="num">02</span><a href="02-opnsense-ad.html">VLAN Segmentation with OPNsense and Active Directory →</a></div>
+      <div class="series-nav-item"><span class="num">03</span><a href="03-wazuh-sysmon-fim.html">Centralized Security Monitoring with Wazuh, Sysmon, and FIM →</a></div>
+      <div class="series-nav-item"><span class="num">04</span><a href="04-suricata-ids-ips.html">Suricata IDS/IPS Integration →</a></div>
+      <div class="series-nav-item"><span class="num">05</span><a href="05-shuffle-soar.html">Automated Response with Shuffle SOAR →</a></div>
+      <div class="series-nav-item"><span class="num">06</span><a href="06-thehive-cortex.html">TheHive + Cortex — Case Management and Enrichment →</a></div>
+      <div class="series-nav-item"><span class="num">07</span><a href="07-velociraptor-dfir.html">Velociraptor — Digital Forensics and Incident Response →</a></div>
+      <div class="series-nav-item current"><span class="num">08</span>MISP — Threat Intelligence and IOC Correlation</div>
+    </div>
+  </div>
+
+  <!-- INTRO -->
+  <div style="margin-top: 64px;">
+    <p>This post documents the eighth chapter of the SOC Lab build series. Chapters 1–7 built the pieces that generate and act on telemetry: network segmentation, endpoint visibility, IDS/IPS, SOAR automation, case management, and digital forensics. All of them share one blind spot — they only know what they can see happening <em>inside</em> this lab. None of them know that a given IP has been a Tor exit node for six months, or that a given file hash belongs to a known Mirai variant. That external knowledge is MISP's job.</p>
+
+    <p><strong>MISP (Malware Information Sharing Platform)</strong> is an IOC repository and sharing platform, not a detection engine. It ingests threat feeds from the outside world, stores them as structured events and attributes, and exposes them for lookup. Two completely separate paths were built in this lab to put that lookup to use: a <strong>native sync into TheHive</strong> (MISP pushes its own curated events in as alerts) and <strong>three Shuffle workflows</strong> that check Sysmon-observed hashes, domains, and IPs against MISP in real time. Both paths hit real, non-obvious problems before they worked.</p>
+
+    <div class="callout info">
+      <span class="callout-icon">ℹ</span>
+      <div class="callout-body">
+        <strong>Scope of This Chapter</strong>
+        This chapter covers MISP itself and both of its integration paths. It does not cover OpenCTI — the graph/analysis layer that later consumes MISP's data via its own connector — which gets its own chapter once that work is complete.
+      </div>
+    </div>
+  </div>
+
+  <!-- ARCHITECTURE -->
+  <div class="section">
+    <div class="section-num">Architecture</div>
+    <h2>Where MISP Sits in the SOC Stack</h2>
+
+    <p>MISP is developed by CIRCL (Luxembourg's national CERT) and is widely adopted across European CERTs and enterprise security teams — it is a de facto standard for structured threat-intel sharing, not a vendor product with a sharing feature bolted on. It is fully open source (AGPL); there is no license tier to buy into, which is part of why it made sense as the IOC layer for this lab.</p>
+
+    <div class="arch-diagram">
+      <span class="arch-node">External feeds<br><span style="font-size:10px;letter-spacing:0">CIRCL · abuse.ch · community</span></span><br>
+      <span style="color:#444">↓</span><br>
+      <span class="arch-node">MISP · 10.1.30.15<br><span style="font-size:10px;letter-spacing:0">event store · restSearch · enrichment</span></span><br>
+      <span style="color:#444">↓ splits into two independent paths ↓</span><br>
+      <span style="display:inline-flex;gap:24px;justify-content:center;flex-wrap:wrap;">
+        <span class="arch-node blue">Native sync → TheHive<br><span style="font-size:10px;letter-spacing:0">MISP-curated events become Alerts</span></span>
+        <span class="arch-node blue">Shuffle restSearch<br><span style="font-size:10px;letter-spacing:0">Sysmon IOCs checked in real time</span></span>
+      </span>
+    </div>
+
+    <div class="vm-card">
+      <div class="vm-card-title">VM Inventory — New Addition</div>
+      <div class="vm-row"><span class="field">misp (SRV-MISP-306)</span><span class="val white">10.1.30.15 · Ubuntu 24.04 · 4 vCPU · 6 GB RAM · 40 GB disk</span></div>
+      <div class="vm-row"><span class="field">Storage pool</span><span class="val">sataProd.srv (ADATA SU650 SATA)</span></div>
+      <div class="vm-row"><span class="field">VLAN</span><span class="val">30 — SOC · static IP · DHCP off</span></div>
+      <div class="vm-row"><span class="field">Software</span><span class="val">MISP 2.5 branch (currently v2.5.40) · Apache2 · MariaDB · Redis · PHP 8.3</span></div>
+      <div class="vm-row"><span class="field">Consumers</span><span class="val">TheHive (native sync) · Shuffle (restSearch) · OpenCTI (Chapter 10, later)</span></div>
+    </div>
+  </div>
+
+  <!-- STEP 1: INSTALLATION -->
+  <div class="section">
+    <div class="section-num">Step 01</div>
+    <h2>Server Installation</h2>
+
+    <p>MISP publishes an official one-shot installer per supported OS. For Ubuntu 24.04, that's <code>INSTALL.ubuntu2404.sh</code> on the project's <code>2.5</code> branch — pulling from the branch rather than a tagged release means the script always installs whatever the current <code>2.5.x</code> point release is, which is how this instance ended up on v2.5.40 without anyone pinning a version number.</p>
+
+    <pre><code><span class="label">MISP VM — 10.1.30.15</span>wget --no-cache -O /tmp/INSTALL.sh \
+  https://raw.githubusercontent.com/MISP/MISP/refs/heads/2.5/INSTALL/INSTALL.ubuntu2404.sh
+
+bash /tmp/INSTALL.sh</code></pre>
+
+    <p>The script asks for a handful of values up front and then runs unattended for 15–30 minutes, logging everything to <code>/var/log/misp_install.log</code>:</p>
+
+    <div class="table-wrap">
+      <table>
+        <thead><tr><th>Prompt</th><th>Value Used</th></tr></thead>
+        <tbody>
+          <tr><td>FQDN / domain</td><td><code>10.1.30.15</code></td></tr>
+          <tr><td>DBPASSWORD_ADMIN</td><td>a strong, generated password (not committed to the repo)</td></tr>
+          <tr><td>DBPASSWORD_MISP</td><td>a strong, generated password (not committed to the repo)</td></tr>
+        </tbody>
+      </table>
+    </div>
+
+    <p>From there it installs Apache2, MariaDB, Redis, PHP 8.3, and MISP core (a git checkout) plus its Python dependencies — every dependency this stack needs, with no manual package wrangling. That's a notably smoother experience than Cortex's install in Chapter 6, which needed a fully manual walkthrough after StrangeBee's own script failed.</p>
+
+    <p>On completion the script prints one-time credentials to the terminal and to <code>/root/misp_settings.txt</code>:</p>
+
+    <div class="vm-card">
+      <div class="vm-card-title">INSTALLER OUTPUT</div>
+      <div class="vm-row"><span class="field">URL</span><span class="val white">https://misp.local</span></div>
+      <div class="vm-row"><span class="field">Username</span><span class="val white">admin@admin.test</span></div>
+      <div class="vm-row"><span class="field">Password</span><span class="val">auto-generated, one-time</span></div>
+      <div class="vm-row"><span class="field">Settings file</span><span class="val white">/root/misp_settings.txt</span></div>
+    </div>
+
+    <div class="callout warn">
+      <span class="callout-icon">⚠</span>
+      <div class="callout-body">
+        <strong>The misp.local Redirect</strong>
+        The installer sets MISP's <code>baseurl</code> to <code>misp.local</code> — a hostname that doesn't exist in this network's DNS. Browsing to <code>https://10.1.30.15</code> works for the login page itself, but MISP redirects internal links back to <code>https://misp.local</code>, which the browser can't resolve. Fix: <strong>Administration → Server Settings & Maintenance → MISP tab → baseurl</strong> → set to <code>https://10.1.30.15</code> → save.
+      </div>
+    </div>
+
+    <p>Three cleanup steps followed the first login: the one-time admin password was changed under <strong>Administration → Edit Profile</strong>, the site admin email was changed from the installer's placeholder <code>admin@admin.test</code> to <code>admin@soc.dev</code>, and a self-signed-certificate browser warning was accepted (PKI trust distribution is a Chapter 8-of-the-old-numbering item — internal PKI — deferred to a later hardening phase, same as everywhere else in this lab).</p>
+
+    <div class="callout info">
+      <span class="callout-icon">ℹ</span>
+      <div class="callout-body">
+        <strong>This Bug Comes Back Later</strong>
+        The <code>misp.local</code> default looks like a cosmetic annoyance here. It resurfaces as the actual root cause of a much more confusing failure in Step 04, when TheHive tries to connect to MISP and gets a hostname it can't resolve either.
+      </div>
+    </div>
+  </div>
+
+  <!-- STEP 2: FEEDS -->
+  <div class="section">
+    <div class="section-num">Step 02</div>
+    <h2>Feed Configuration</h2>
+
+    <p>A fresh MISP install has no data — it's an empty repository until feeds are attached. <strong>Sync Actions → Feeds → Load default feed metadata</strong> populates the feed list with MISP's own curated catalog of roughly 70 community and commercial sources, none of them enabled yet.</p>
+
+    <p>Enabling all 70 was never the plan — most either overlap with detection already covered elsewhere in this lab or require a paid license. Feeds were reviewed page by page and enabled selectively:</p>
+
+    <div class="table-wrap">
+      <table>
+        <thead><tr><th>Feed</th><th>Why It Was Enabled</th></tr></thead>
+        <tbody>
+          <tr><td>CIRCL OSINT Feed</td><td>MISP's own team feed — the highest-quality general-purpose source</td></tr>
+          <tr><td>The Botvrij.eu Data</td><td>Clean OSINT aggregation, low false-positive rate</td></tr>
+          <tr><td>abuse.ch URLhaus</td><td>Actively-distributing malware URLs</td></tr>
+          <tr><td>abuse.ch ThreatFox</td><td>IOC-to-malware-family mapping</td></tr>
+          <tr><td>abuse.ch Feodo / Feodo IP Blocklist</td><td>Botnet C2 IPs (Emotet/Dridex/QakBot family trackers)</td></tr>
+          <tr><td>MalwareBazaar</td><td>Malware sample hashes</td></tr>
+          <tr><td>Tor exit nodes</td><td>Anonymization-network egress IPs</td></tr>
+          <tr><td>cybercrime-tracker.net</td><td>Active C2 panel IPs/domains</td></tr>
+          <tr><td>Phishtank (valid, online)</td><td>Live phishing URLs</td></tr>
+          <tr><td>firehol_level1</td><td>High-confidence aggregate IP blocklist</td></tr>
+          <tr><td>High-Confidence DGA-Based C&Cs</td><td>Domain-generation-algorithm C2 infrastructure</td></tr>
+          <tr><td>Maltrail IOC feed</td><td>Broad, actively-maintained community IOC list</td></tr>
+          <tr><td>DigitalSide Threat-Intel</td><td>OSINT-derived hash/domain/IP feed</td></tr>
+          <tr><td>Threatview.io</td><td>Community-aggregated indicators</td></tr>
+        </tbody>
+      </table>
+    </div>
+
+    <p>Deliberately skipped: <strong>ET Open block rules</strong> (Suricata already runs the full ET ruleset directly), the <strong>Tor "all nodes"</strong> list (a maintainer warning flagged lock-out risk on a lab-scale instance), <strong>Snort IP lists</strong> (redundant with Suricata's own coverage), and the <strong>Bambenek feeds</strong> (require a paid license). The final count landed at <strong>45 enabled feeds</strong>, refreshed on MISP's default daily schedule; four of them (feed IDs 50, 59, 75, 91) intermittently fail to fetch, which is unremarkable for free community sources and not worth chasing.</p>
+
+    <div class="callout danger">
+      <span class="callout-icon">✕</span>
+      <div class="callout-body">
+        <strong>The Distribution=0 Trap</strong>
+        Every feed-pulled event arrived with <code>distribution: 0</code> — "Your Organisation Only." That setting doesn't just describe who MISP would sync the event <em>out</em> to; it also governs whether a consumer like TheHive's sync connector can see the event at all when it queries the API. With distribution left at 0, TheHive's connector was going to complete a "successful" sync and see nothing, and there would be no error message to point at.
+      </div>
+    </div>
+
+    <p>The fix for <em>future</em> pulls was straightforward: every enabled feed's distribution setting was changed from 0 to <strong>"This Community Only" (1)</strong> via the MISP UI, so new events land visible from the moment they're pulled. That left roughly <strong>2,255 already-imported historical events</strong> still sitting at distribution=0.</p>
+
+    <h3>The Bulk-Update Script — Written, Debugged, Then Abandoned</h3>
+
+    <p>A small script was written to bulk-patch those 2,255 events via the MISP REST API, using <code>curl</code> and <code>jq</code>. Getting it working surfaced three real gotchas:</p>
+
+    <div class="table-wrap">
+      <table>
+        <thead><tr><th>Gotcha</th><th>Detail</th></tr></thead>
+        <tbody>
+          <tr><td>API key is IP-restricted</td><td>The key only authenticates from <code>10.1.30.15</code> itself — the script had to run on the MISP host, not from a workstation</td></tr>
+          <tr><td>Wrong jq path</td><td>Event IDs are nested at <code>.response[].Event.id</code>, not <code>.[].Event.id</code> as a first attempt assumed</td></tr>
+          <tr><td>Count endpoint shape</td><td>MISP's event-count endpoint returns a bare number, not a JSON object — parsing it as an object silently returned null</td></tr>
+        </tbody>
+      </table>
+    </div>
+
+    <div class="callout success">
+      <span class="callout-icon">✓</span>
+      <div class="callout-body">
+        <strong>Decision: Abandoned, Not Blocked</strong>
+        Once the script actually worked, the update was run against a handful of test events — then deliberately not run against all 2,255. The reasoning: those are historical events dating back to 2016–2025, they add no forward-looking detection value, and every new event pulled from this point forward already lands correctly at distribution=1. Spending more time bulk-patching stale data for its own sake would have been effort without a payoff. Choosing not to finish a fix once it stops being useful is itself an engineering call worth stating outright, not a task left quietly undone.
+      </div>
+    </div>
+  </div>
+
+  <!-- STEP 3: ENRICHMENT -->
+  <div class="section">
+    <div class="section-num">Step 03</div>
+    <h2>Enrichment: misp-modules and the Cortex Link</h2>
+
+    <p>MISP ships an optional companion service, <strong>misp-modules</strong>, that adds lookup/enrichment capability beyond raw feed storage — passive DNS, hash reputation, WHOIS, TLS certificate inspection, and more, each as its own pluggable module. It runs as its own systemd service on port <strong>6666</strong>.</p>
+
+    <div class="table-wrap">
+      <table>
+        <thead><tr><th>Module</th><th>Function</th></tr></thead>
+        <tbody>
+          <tr><td>hashlookup</td><td>Known-hash reputation (CIRCL's own hash database)</td></tr>
+          <tr><td>urlhaus / threatfox / malwarebazaar</td><td>Direct lookups against the same abuse.ch sources used as feeds</td></tr>
+          <tr><td>threatminer</td><td>Passive DNS and related-indicator pivoting</td></tr>
+          <tr><td>whois</td><td>Domain registration lookup</td></tr>
+          <tr><td>tls_certificate_check</td><td>Certificate chain / validity inspection for a given host</td></tr>
+        </tbody>
+      </table>
+    </div>
+
+    <div class="callout warn">
+      <span class="callout-icon">⚠</span>
+      <div class="callout-body">
+        <strong>Known Issue: DNS Module Fails to Load</strong>
+        The built-in <code>dns</code> resolution module throws a <code>KeyError</code> on startup and never registers. This is a documented issue in the module itself rather than a local misconfiguration — left disabled rather than patched, since passive-DNS coverage is already available through the <code>threatminer</code> module.
+      </div>
+    </div>
+
+    <p>Enrichment services and the Cortex link are both configured under <strong>Administration → Server Settings & Maintenance → Plugin Settings</strong>:</p>
+
+    <div class="vm-card">
+      <div class="vm-card-title">PLUGIN SETTINGS</div>
+      <div class="vm-row"><span class="field">Enrichment_services_enable</span><span class="val white">true</span></div>
+      <div class="vm-row"><span class="field">Enrichment_services_url</span><span class="val white">http://127.0.0.1 : 6666</span></div>
+      <div class="vm-row"><span class="field">Cortex_services_enable</span><span class="val white">true</span></div>
+      <div class="vm-row"><span class="field">Cortex_services_url</span><span class="val white">http://10.1.30.13 : 9001</span></div>
+      <div class="vm-row"><span class="field">Cortex_authkey</span><span class="val">a dedicated Cortex API key</span></div>
+      <div class="vm-row"><span class="field">Cortex_services_ssl_verify</span><span class="val white">false</span></div>
+    </div>
+
+    <div class="callout danger">
+      <span class="callout-icon">✕</span>
+      <div class="callout-body">
+        <strong>MISP 2.5's Enrichment UI Bug</strong>
+        Triggering "Enrich" from an attribute's UI dropdown against the Cortex connector sends <code>attribute_id=0</code> instead of the real attribute ID — a known bug in this MISP version, not a local misconfiguration. The UI path silently fails. The working alternative is the CLI:
+      </div>
+    </div>
+
+    <pre><code><span class="label">MISP VM — CLI enrichment workaround</span>sudo -u www-data /var/www/MISP/app/Console/cake \
+  Event enrichment 1 <span class="v">&lt;event_id&gt;</span> '["Cortex"]'</code></pre>
+
+    <p>Diagnostics (<strong>Administration → Server Settings & Maintenance → Diagnostics</strong>) confirmed every relevant check green: Enrichment OK, Import OK, Export OK, Cortex OK. Two feed-correlation lookups against known-bad indicators validated the whole chain end-to-end: <code>185.220.101.45</code> (the same Tor-exit IP range enriched via Cortex in Chapter 6) returned matches against three separate ingested feeds, and <code>162.243.103.246</code> matched two more — proof that the 45 enabled feeds were actually contributing overlapping, cross-referenced coverage rather than 45 disconnected lists.</p>
+  </div>
+
+  <!-- STEP 4: THEHIVE NATIVE CONNECTOR -->
+  <div class="section">
+    <div class="section-num">Step 04</div>
+    <h2>The Native TheHive ↔ MISP Connector</h2>
+
+    <p>TheHive has a built-in MISP sync connector, separate and unrelated to anything Shuffle does — it periodically pulls MISP's own published events and turns matching ones into TheHive Alerts directly, no SOAR platform in the middle. Getting it actually working took the longest single troubleshooting chain in this lab so far.</p>
+
+    <h3>1. Three Failed Connection Attempts</h3>
+
+    <div class="table-wrap">
+      <table>
+        <thead><tr><th>Attempt</th><th>Result</th><th>Real Cause</th></tr></thead>
+        <tbody>
+          <tr>
+            <td><code>https://misp.local</code> via the TheHive UI connector</td>
+            <td class="danger-cell">PKIX path building failed</td>
+            <td>Self-signed MISP certificate, untrusted by TheHive's JVM</td>
+          </tr>
+          <tr>
+            <td><code>http://10.1.30.15</code>, switched to HTTP</td>
+            <td class="danger-cell">"misp.localapi" resolution error</td>
+            <td>MISP's <code>external_baseurl</code> was still <code>misp.local</code> — MISP itself handed back that hostname, which TheHive's VM can't resolve</td>
+          </tr>
+          <tr>
+            <td><code>https://10.1.30.15</code> + "Do not check Certificate Authority" toggle</td>
+            <td class="danger-cell">PKIX error persists</td>
+            <td>The UI toggle doesn't reach JVM-level certificate validation — it's cosmetic</td>
+          </tr>
+        </tbody>
+      </table>
+    </div>
+
+    <p>The <code>external_baseurl</code> half of this is the exact same default from Step 01's installer warning, now causing a second, less obvious failure downstream.</p>
+
+    <h3>2. The Fix That Actually Worked</h3>
+
+    <p>The UI connector was deleted outright — leaving it in place alongside a manual config risks two connectors racing each other. The working configuration lives in <code>/etc/thehive/application.conf</code>, using a community-documented workaround (kifarunix.com) that sets SSL leniency at the config level instead of relying on the ineffective UI toggle:</p>
+
+    <pre><code><span class="label">/etc/thehive/application.conf</span>misp {
+  interval: 10 minutes
+  servers: [
+    {
+      name: <span class="s">"MISP"</span>
+      url: <span class="s">"https://10.1.30.15"</span>
+      auth {
+        type: key
+        key: <span class="s">"&lt;REDACTED_API_KEY&gt;"</span>
+      }
+      wsConfig.ssl.loose.acceptAnyCertificate: <span class="kw">true</span>
+      purpose: ImportAndExport
+      tags: [<span class="s">"misp"</span>]
+      max-attributes: 1000
+      max-age: 30 days
+    }
+  ]
+}</code></pre>
+
+    <div class="callout info">
+      <span class="callout-icon">ℹ</span>
+      <div class="callout-body">
+        <strong>Where the Real Logs Actually Are</strong>
+        <code>journalctl</code> for the TheHive service came back empty during this debugging session. The application's own logs — where the connector's actual startup and sync messages appear — are written separately to <code>/var/log/thehive/application.log</code>, configured via <code>/etc/thehive/logback.xml</code>. Worth checking first next time, before assuming journald has nothing to say.
+      </div>
+    </div>
+
+    <p>After a restart, the log confirmed <code>Add MISP connection MISP</code> and, shortly after, <code>MISP synchronisation is complete</code>. Progress — but <strong>zero alerts appeared in TheHive.</strong></p>
+
+    <h3>3. Isolating the Problem With a Controlled Test Event</h3>
+
+    <p>Rather than keep guessing against thousands of historical feed events, a single MISP event was created by hand to act as a known-good control: <code>ip-dst 185.220.101.42</code> (a Tor exit node — the same address family used for the Cortex enrichment test in Chapter 6), <code>distribution: 1</code>, <code>published: true</code>, <code>to_ids: true</code>. If a purpose-built, fully-compliant event still didn't surface, the problem wasn't the data.</p>
+
+    <p>Two real, independent root causes were behind the silence:</p>
+
+    <div class="table-wrap">
+      <table>
+        <thead><tr><th>Root Cause</th><th>Detail</th></tr></thead>
+        <tbody>
+          <tr>
+            <td>Feed events: <code>distribution=0</code> + <code>published=false</code></td>
+            <td>Addressed in Step 02 for all future pulls — the pre-existing 2,255 events remain historically affected, by choice</td>
+          </tr>
+          <tr>
+            <td>TheHive Platinum trial license had expired</td>
+            <td>The license's <code>valid-from</code> and <code>valid-until</code> timestamps were, bizarrely, <strong>identical</strong> — the trial was already "expired" the moment it activated</td>
+          </tr>
+        </tbody>
+      </table>
+    </div>
+
+    <div class="callout danger">
+      <span class="callout-icon">✕</span>
+      <div class="callout-body">
+        <strong>A License Bug Silently Breaking a Detection Feature</strong>
+        On startup, the expired trial threw <code>[ERROR] uncaught error, not retrying</code> inside <code>LicenseSrv.getTrialLicense</code>. That failure cascaded into an <code>EnterpriseModule</code> initialization failure — which silently prevented the MISP sync scheduler from ever actually running, despite the log lines claiming a completed sync. The same root cause was independently producing a <code>Cortex quota=0</code> warning every minute, which had briefly been treated as an unrelated Cortex-side problem before the two symptoms were traced back to one license failure.
+      </div>
+    </div>
+
+    <h3>4. Resolution — the Community License</h3>
+
+    <p>StrangeBee's <strong>Community license</strong> is free and permanent, requested through their licensing portal. For this lab it covers 2 normal users, 1 MISP server slot, 1 Cortex server slot, and unlimited service accounts — comfortably enough for everything built here. Once issued and activated (<strong>Platform Management → License → Activate</strong>, followed by a restart), the startup log showed no license error, the MISP UI connector was re-enabled (the <code>application.conf</code> block was then removed to avoid running two connectors at once), and the sync interval was reverted from the 1-minute testing value back to the default 10 minutes.</p>
+
+    <div class="callout success">
+      <span class="callout-icon">✓</span>
+      <div class="callout-body">
+        <strong>End-to-End Validation</strong>
+        Test event 2264 appeared in TheHive Alerts within one sync interval. The full pipeline was then validated with a real feed-sourced event: <strong>MISP feed → TheHive Alert → Case #74 → SHA-256 observable → Cortex <code>VirusTotal_GetReport_3_1</code> → 38/64 malicious</strong>, correctly identifying a Mirai ELF sample ("morte.sh4.elf"). The native connector, the license, and the Cortex enrichment chain from Chapter 6 were all working together on one real indicator.
+      </div>
+    </div>
+  </div>
+
+  <!-- STEP 5: HASH IOC WORKFLOW -->
+  <div class="section">
+    <div class="section-num">Step 05</div>
+    <h2>Wazuh → MISP IOC Correlation: Hash Workflow (Shuffle)</h2>
+
+    <p>The native connector in Step 04 surfaces what MISP already knows and has published as an event. The three workflows in this section and the next two answer a different, more active question: for a hash, domain, or IP that Sysmon <em>just observed</em> on an endpoint, is it already listed in MISP right now? This is the same Shuffle instance built in Chapter 5, extended with three new automations — none of which Chapter 5 covered, since MISP didn't exist yet when that chapter was written.</p>
+
+    <p>All three follow the same fail-closed shape: a narrow Wazuh child rule elevates only the events worth checking, Shuffle queries MISP's <code>restSearch</code> endpoint, and a hit creates a TheHive case while a miss closes cleanly with no case created.</p>
+
+    <p><strong>misp-hash-ioc</strong> watches Sysmon Event 1 (process creation) via child rule <strong>100170</strong>. Like every other custom rule in this lab, it's a child of a base rule that stays at level 0 — Wazuh's own built-in Sysmon rule set (<code>0595-win-sysmon_rules.xml</code>) ships every mapping rule at level 0 by design, and only child rules keyed off <code>if_sid</code> actually fire, so this pattern was adopted project-wide rather than fighting it per rule.</p>
+
+    <div class="arch-diagram">
+      <span class="arch-node">Sysmon Event 1</span> → <span class="arch-node">Rule 100170</span> → <span class="arch-node blue">Shuffle webhook</span><br>
+      <span style="color:#444">↓</span><br>
+      <span class="arch-node">Cache check (sha256)</span> → <span style="color:#555">found:true → close, no MISP call</span><br>
+      <span style="color:#444">↓ found:false</span><br>
+      <span class="arch-node">MISP restSearch</span> → <span class="arch-node red">Hit → TheHive case</span>
+    </div>
+
+    <div class="callout danger">
+      <span class="callout-icon">✕</span>
+      <div class="callout-body">
+        <strong>The Hyphen Bug</strong>
+        The dedup cache node was named <code>Get-cache-value</code>. Shuffle silently converts hyphens to underscores when a node's output is referenced as a variable — so the correct reference is <code>$get_cache_value</code>, not <code>$get-cache-value</code>. The hyphenated reference resolved to nothing rather than erroring, which meant the <code>found</code> check silently always evaluated false and MISP Check ran on every event regardless of cache state — defeating the entire point of deduplication without ever throwing a visible error.
+      </div>
+    </div>
+
+    <p>The corrected architecture: Parse → <code>Get-cache-value</code> (key=sha256, category=hash_ioc) → branch on <code>$get_cache_value</code> <code>found</code> ≠ true → MISP Check (restSearch on the hash) → Set-Cache-Value → TheHive case on a hit, or a clean close on a miss. Verified end-to-end against live traffic — three real hash matches produced TheHive <strong>Cases #586–588</strong>.</p>
+  </div>
+
+  <!-- STEP 6: DNS IOC WORKFLOW -->
+  <div class="section">
+    <div class="section-num">Step 06</div>
+    <h2>Wazuh → MISP IOC Correlation: DNS Workflow (Shuffle)</h2>
+
+    <p><strong>misp-dns-ioc</strong> watches Sysmon Event 22 (DNS query) via child rule <strong>100160</strong> (<code>if_sid</code> on base rule 61650). The very first live measurement made clear this couldn't ship unfiltered: a 2–3 minute window produced roughly <strong>40 alerts</strong> — not attacker activity, just ordinary Windows and Active Directory chatter (AD service-record lookups, telemetry endpoints, local-suffix resolution). Sending all of it to MISP would have burned through Shuffle's execution budget on noise with zero detection value.</p>
+
+    <p>A regex filter was built and Python-tested against captured samples before being wired into the workflow:</p>
+
+    <pre><code><span class="label">DNS noise filter — Python-tested</span>(?i)(^_|\.soc\.dev\.?$|in-addr\.arpa$|(?!wpad$)^[^.]+$|
+msftconnecttest\.com$|\.windowsupdate\.com$|
+\.office\.com$|\.cloud\.microsoft$|onecdn\.static\.microsoft$)</code></pre>
+
+    <div class="callout warn">
+      <span class="callout-icon">⚠</span>
+      <div class="callout-body">
+        <strong>wpad Is Deliberately NOT Excluded</strong>
+        The single-label exclusion <code>^[^.]+$</code> would ordinarily catch <code>wpad</code> too, but the pattern carves out an explicit exception for it. WPAD auto-proxy discovery is a real, actively-used man-in-the-middle technique (the Responder tool spoofs exactly this lookup) — SwiftOnSecurity's widely-used Sysmon config explicitly warns against filtering it out. Excluding it here to reduce noise would have quietly closed off a real detection surface.
+      </div>
+    </div>
+
+    <p>Active Directory SRV records (the <code>^_</code> prefix) are excluded from this workflow specifically — not because they carry no detection value, but because they never appear in any external MISP feed; an IOC-matching workflow has nothing useful to check them against. The underlying Sysmon telemetry isn't lost: base rule 61650 still fires and is fully queryable, and detection responsibility for that traffic pattern shifts to frequency/behavioral analysis — planned as capstone-stage Sigma content, not this IOC-matching layer.</p>
+
+    <div class="key-insight">
+      <p>"An IOC-matching workflow answers 'is this exact value already known to be bad' — that's a narrower question than behavioral detection, and deliberately so. Not every log source belongs in every detection layer."</p>
+    </div>
+  </div>
+
+  <!-- STEP 7: NETWORK IOC WORKFLOW -->
+  <div class="section">
+    <div class="section-num">Step 07</div>
+    <h2>Wazuh → MISP IOC Correlation: Network Workflow (Shuffle)</h2>
+
+    <p><strong>misp-network-ioc</strong> watches Sysmon Event 3 (network connection). The first implementation attempt overrode base rule <strong>61605</strong> directly — flipping it from level 0 to level 3 with <code>overwrite="yes"</code> and no filter, sending every network connection Sysmon logs, including all internal LAN chatter, straight to the Shuffle webhook.</p>
+
+    <div class="callout danger">
+      <span class="callout-icon">✕</span>
+      <div class="callout-body">
+        <strong>157 Raw Triggers vs. 4 That Mattered</strong>
+        A live measurement window caught <strong>157 raw Event 3 triggers</strong> against the unfiltered override — of which only <strong>4</strong> would have passed a simple external-IP filter. At that ratio, this one workflow alone risked burning through Shuffle's monthly execution quota on internal traffic that was never going to match an external IOC feed anyway. Reverted immediately.
+      </div>
+    </div>
+
+    <p>The fix restored the same pattern used everywhere else: base rule 61605 stays at level 0, and a new child rule — <strong>100180</strong> (<code>if_sid=61605</code>) — elevates only connections to a destination outside RFC1918, loopback, and link-local ranges. Verified end-to-end against live traffic: the filter fires correctly, a MISP Check against benign external traffic returns HTTP 200 with an empty <code>Attribute</code> array, and both downstream branches (case creation on a hit, clean close on a miss) behave correctly.</p>
+
+    <div class="callout warn">
+      <span class="callout-icon">⚠</span>
+      <div class="callout-body">
+        <strong>Open Item: Multicast Isn't Excluded</strong>
+        Rule 100180's regex excludes RFC1918, loopback, and link-local — but not multicast (<code>224.0.0.0/4</code>, <code>ff00::/8</code>). Three mDNS/Bonjour hits passed through as "external" during testing. Low volume, no detection value, and documented here rather than silently fixed later — a small, known gap beats an unstated one.
+      </div>
+    </div>
+
+    <p>A second filtering layer also exists Shuffle-side: an <code>Internal IP Check RFC1918</code> node using <code>cidr_ip_match</code>. One execution capture caught its <code>networks</code> field completely empty — a silent no-op at that point in time. It's since been populated (<code>10.0.0.0/8</code>, <code>172.16.0.0/12</code>, <code>192.168.0.0/16</code>), but loopback and link-local ranges aren't in it yet, and the fix hasn't been re-verified against a fresh live execution. Wazuh's rule 100180 is the layer already confirmed working end-to-end, so this second layer is tracked as a documented low-priority gap rather than a blocker.</p>
+
+    <p>One further, structural finding — confirmed against Olaf Hartong's own <code>sysmon-modular</code> documentation rather than assumed: this workflow's ceiling is inherently lower than the DNS and hash workflows. The config uses an <strong>include-only (allowlist) model</strong> for NetworkConnect — Sysmon only logs Event 3 at all for MITRE-technique-tagged connection patterns (masquerading, non-standard ports, and similar). Ordinary browser or <code>curl</code> HTTPS traffic never generates an Event 3 in the first place, so it never reaches this rule regardless of any filter written here. That's intentional upstream noise reduction in the community config, not a local bug.</p>
+  </div>
+
+  <!-- STEP 8: WARNINGLISTS -->
+  <div class="section">
+    <div class="section-num">Step 08</div>
+    <h2>Warninglists — A Conscious Decision Not to Activate Yet</h2>
+
+    <p>MISP warninglists suppress well-known-benign values — public DNS resolvers, major CDN ranges, and similar — from being treated as IOCs even where they technically match an attribute somewhere in a feed. They're a real feature this lab hasn't turned on yet, and that's a decision rather than an oversight.</p>
+
+    <div class="callout warn">
+      <span class="callout-icon">⚠</span>
+      <div class="callout-body">
+        <strong>Why Not Just Enable Them All</strong>
+        Bulk-enabling broad categories — VPN exit-node lists, CDN IP ranges, Tranco top-1M domain lists — carries real false-negative risk. An attacker staging infrastructure behind a popular CDN IP, or using a compromised domain that happens to sit inside a "top 1M" allowlist, would be silently whitelisted out of every future MISP match. Content review before activation, one list at a time, was chosen over a single bulk toggle.
+      </div>
+    </div>
+
+    <p>This is also why it isn't a single point of failure for the network-IOC workflow in Step 07: RFC1918/loopback/link-local exclusion is already enforced upstream, twice — once at the Wazuh rule level (100180) and once at the Shuffle level (the <code>cidr_ip_match</code> node). MISP's own warninglist mechanism, once activated, will be a third, complementary layer rather than the only thing standing between internal chatter and a false IOC match.</p>
+
+    <div class="callout info">
+      <span class="callout-icon">→</span>
+      <div class="callout-body">
+        <strong>Deferred</strong>
+        Warninglist activation, the TheHive → MISP observable export (feeding analyst-confirmed IOCs from case work back into MISP), and Galaxy/MITRE ATT&CK tagging of MISP events are all still open. None of the three block anything already documented in this chapter — they extend it — and are picked up in a later pass once OpenCTI (Chapter 10) is in place and there's a full picture of what tagging scheme serves both platforms.
+      </div>
+    </div>
+  </div>
+
+  <!-- TROUBLESHOOTING -->
+  <div class="section">
+    <div class="section-num">Troubleshooting</div>
+    <h2>Problems Hit During Setup</h2>
+
+    <div class="table-wrap">
+      <table>
+        <thead><tr><th>Problem</th><th>Root Cause</th><th>Fix</th></tr></thead>
+        <tbody>
+          <tr>
+            <td>MISP redirects back to an unresolvable <code>misp.local</code></td>
+            <td>Installer sets <code>baseurl</code> to <code>misp.local</code> by default</td>
+            <td class="ok">Administration → Server Settings → MISP tab → <code>baseurl</code> → <code>https://10.1.30.15</code></td>
+          </tr>
+          <tr>
+            <td>Feed-pulled events invisible to consumers</td>
+            <td>Feeds import at <code>distribution=0</code> ("Your Organisation Only") by default</td>
+            <td class="ok">All 45 enabled feeds switched to distribution=1 ("This Community Only")</td>
+          </tr>
+          <tr>
+            <td>Bulk-updating 2,255 historical events via API</td>
+            <td>IP-allowlisted key, wrong jq path, count endpoint returns a raw number</td>
+            <td class="ok">Script fixed and tested, then deliberately not run at scale — no forward-looking value in historical data</td>
+          </tr>
+          <tr>
+            <td>MISP enrichment via Cortex fails from the UI</td>
+            <td>Known MISP 2.5 bug — sends <code>attribute_id=0</code></td>
+            <td class="ok">CLI workaround: <code>cake Event enrichment</code></td>
+          </tr>
+          <tr>
+            <td>TheHive MISP connector: PKIX path building failed</td>
+            <td>Self-signed MISP certificate, untrusted by the JVM</td>
+            <td class="ok">Configured via <code>application.conf</code> with <code>wsConfig.ssl.loose.acceptAnyCertificate: true</code></td>
+          </tr>
+          <tr>
+            <td>TheHive MISP connector: "misp.localapi" resolution error</td>
+            <td>MISP's <code>external_baseurl</code> still set to <code>misp.local</code></td>
+            <td class="ok">Set <code>external_baseurl</code> to <code>https://10.1.30.15</code></td>
+          </tr>
+          <tr>
+            <td>"Do not check CA" toggle doesn't fix the PKIX error</td>
+            <td>The UI toggle doesn't reach JVM-level certificate validation</td>
+            <td class="ok"><code>wsConfig.ssl.loose.acceptAnyCertificate</code> set directly in config</td>
+          </tr>
+          <tr>
+            <td>Sync completes per the logs, but zero TheHive alerts</td>
+            <td>Two independent causes: historical events at distribution=0, and an expired TheHive trial license silently blocking the sync scheduler</td>
+            <td class="ok">Feed distribution fixed; free StrangeBee Community license activated</td>
+          </tr>
+          <tr>
+            <td>Cortex "quota=0" warning every minute</td>
+            <td>Same expired-license root cause as the MISP sync failure — not a separate Cortex problem</td>
+            <td class="ok">Resolved once the Community license was activated</td>
+          </tr>
+          <tr>
+            <td>Hash-IOC dedup cache never registers a hit</td>
+            <td>Node named <code>Get-cache-value</code> referenced as <code>$get-cache-value</code> — Shuffle converts hyphens to underscores in variable names</td>
+            <td class="ok">Referenced as <code>$get_cache_value</code></td>
+          </tr>
+          <tr>
+            <td>DNS-IOC workflow floods on ordinary Windows/AD chatter</td>
+            <td>~40 alerts in 2–3 minutes from Event 22, mostly AD SRV and telemetry lookups</td>
+            <td class="ok">Python-tested regex filter, with an explicit exception for <code>wpad</code></td>
+          </tr>
+          <tr>
+            <td>Network-IOC workflow: 157 raw triggers, quota risk</td>
+            <td>Base rule 61605 overridden directly (level 0→3), no filter, all internal traffic included</td>
+            <td class="ok">Reverted; replaced with child rule 100180 (RFC1918/loopback/link-local exclusion)</td>
+          </tr>
+        </tbody>
+      </table>
+    </div>
+  </div>
+
+  <!-- SUMMARY -->
+  <div class="section">
+    <div class="section-num">Summary</div>
+    <h2>What Was Built, What's Running?</h2>
+
+    <div class="table-wrap">
+      <table>
+        <thead><tr><th>Component</th><th>Detail</th><th>Status</th></tr></thead>
+        <tbody>
+          <tr><td>MISP Server</td><td>v2.5.40 · Ubuntu 24.04 · 10.1.30.15</td><td class="ok">● Active</td></tr>
+          <tr><td>Feed ingestion</td><td>45 enabled feeds, daily automatic fetch + cache</td><td class="ok">● Running</td></tr>
+          <tr><td>misp-modules enrichment</td><td>Port 6666 · hashlookup, whois, urlhaus, threatfox, malwarebazaar, threatminer, tls_certificate_check</td><td class="ok">● Active</td></tr>
+          <tr><td>MISP ↔ Cortex link</td><td>Diagnostics: Enrichment / Import / Export / Cortex all green</td><td class="ok">● Verified</td></tr>
+          <tr><td>TheHive native connector</td><td>10-minute sync interval · Community license · Case #74 validated end-to-end</td><td class="ok">● Active</td></tr>
+          <tr><td>misp-hash-ioc (Shuffle)</td><td>Sysmon Event 1 → cache dedup → MISP restSearch → TheHive</td><td class="ok">● Cases #586–588 verified</td></tr>
+          <tr><td>misp-dns-ioc (Shuffle)</td><td>Sysmon Event 22 → noise-filtered → MISP restSearch → TheHive</td><td class="ok">● Verified</td></tr>
+          <tr><td>misp-network-ioc (Shuffle)</td><td>Sysmon Event 3 → RFC1918-filtered → MISP restSearch → TheHive</td><td class="ok">● Verified</td></tr>
+          <tr><td>Proxmox snapshot</td><td>Taken after feed configuration, TheHive connector fix, and all three Shuffle workflows</td><td class="ok">● Taken</td></tr>
+        </tbody>
+      </table>
+    </div>
+
+    <div class="callout info">
+      <span class="callout-icon">→</span>
+      <div class="callout-body">
+        <strong>Deferred: Warninglists, Observable Export, Galaxy/ATT&CK Tagging</strong>
+        As covered in Step 08, these three extend this chapter's work rather than block it. They're picked up once OpenCTI (Chapter 10) is in place, so the tagging scheme and warninglist scope can be decided with both consumers in view rather than twice.
+      </div>
+    </div>
+  </div>
+
+  <!-- ROADMAP -->
+  <div class="section">
+    <div class="section-num">What's Next?</div>
+    <h2>Project Roadmap</h2>
+
+    <ul class="checklist">
+      <li>Proxmox installation and base virtualization infrastructure <span class="badge done">Complete</span></li>
+      <li>VLAN segmentation and firewall rules with OPNsense <span class="badge done">Complete</span></li>
+      <li>Active Directory Domain Services and GPO configuration <span class="badge done">Complete</span></li>
+      <li>Wazuh Manager installation, Sysmon GPO deployment, FIM configuration <span class="badge done">Complete</span></li>
+      <li>Suricata IPS integration — Netmap mode, active blocking <span class="badge done">Complete</span></li>
+      <li>Automated response workflows with Shuffle SOAR <span class="badge done">Complete</span></li>
+      <li>TheHive + Cortex — case management and enrichment <span class="badge done">Complete</span></li>
+      <li>Velociraptor — digital forensics and incident response <span class="badge done">Complete</span></li>
+      <li>MISP — threat intelligence and IOC correlation <span class="badge done">Complete</span></li>
+      <li>OpenCTI — extended threat-intel graph layer</li>
+      <li>Grafana (dashboards)</li>
+      <li>OpenVAS / Greenbone (vulnerability management)</li>
+      <li>Atomic Red Team / Caldera (attack simulation)</li>
+    </ul>
+  </div>
+
+  <div class="series-nav">
+    <div class="series-nav-label">SOC Lab Series — All Chapters</div>
+    <div class="series-nav-links">
+      <div class="series-nav-item"><span class="num">01</span><a href="01-proxmox-setup.html">Proxmox Installation, VM Configuration, and Remote Access →</a></div>
+      <div class="series-nav-item"><span class="num">02</span><a href="02-opnsense-ad.html">VLAN Segmentation with OPNsense and Active Directory →</a></div>
+      <div class="series-nav-item"><span class="num">03</span><a href="03-wazuh-sysmon-fim.html">Centralized Security Monitoring with Wazuh, Sysmon, and FIM →</a></div>
+      <div class="series-nav-item"><span class="num">04</span><a href="04-suricata-ids-ips.html">Suricata IDS/IPS Integration →</a></div>
+      <div class="series-nav-item"><span class="num">05</span><a href="05-shuffle-soar.html">Automated Response with Shuffle SOAR →</a></div>
+      <div class="series-nav-item"><span class="num">06</span><a href="06-thehive-cortex.html">TheHive + Cortex — Case Management and Enrichment →</a></div>
+      <div class="series-nav-item"><span class="num">07</span><a href="07-velociraptor-dfir.html">Velociraptor — Digital Forensics and Incident Response →</a></div>
+      <div class="series-nav-item current"><span class="num">08</span>MISP — Threat Intelligence and IOC Correlation</div>
+    </div>
+  </div>
+
+</div>
+</div>
+
+<div class="footer">
+  <p style="margin-bottom:8px"><strong>SOC Lab Series</strong> · Chapter 8 — MISP</p>
+  <p>MISP v2.5.40 · Ubuntu 24.04 · Shuffle SOAR · TheHive 5.5.3 Community</p>
+</div>
+
+</body>
+</html>
