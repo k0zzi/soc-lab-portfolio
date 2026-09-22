@@ -1,9 +1,5 @@
-# Red team artifacts — reserved
+# Red Team
 
-This folder is reserved for red-team / attack-simulation artifacts
-(Atomic Red Team test results, Caldera operation configs and logs)
-planned for a later phase of this project, once the blue-team stack
-documented under `tools/blue-team/` has a validated detection baseline
-to test against.
+`findings/` holds Atomic Red Team detection-validation results — six MITRE ATT&CK techniques run against live telemetry in this lab, each result (caught, missed, or prevented) traced to a specific root cause and cross-checked against MITRE ATT&CK, CISA, and major-vendor detection guidance, with fixes verified through genuine before/after comparisons. See `findings/detection-validation-cycle.md` for the full methodology write-up and `findings/detection-coverage.md` for the DeTT&CT-scored coverage summary.
 
-Nothing is here yet — this is a placeholder, not an oversight.
+Caldera-based adversary emulation is planned for a later phase — partly to test the deferred remediation items already identified in the current findings (see `findings/detection-validation-cycle.md`'s Lessons Learned section), and partly to exercise scenarios closer to a real intrusion chain than single, isolated techniques. Its own artifacts will land here as a sibling to `findings/` when that work starts.
