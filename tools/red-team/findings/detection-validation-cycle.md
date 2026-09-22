@@ -1,4 +1,4 @@
-# Detection Validation Cycle — Atomic Red Team Capstone (ADIM B)
+# Detection Validation Cycle — Atomic Red Team Capstone
 
 This capstone is a **purple-team detection-validation exercise**, not an incident response — no host was ever actually compromised. The structure below follows the purple-team / detection-engineering lifecycle used across the industry for exactly this kind of exercise, rather than an incident-handling framework like SANS's PICERL, which assumes a real breach and forces awkward "not applicable" phases onto planned, authorized testing.
 

@@ -1,4 +1,4 @@
-# Detection Coverage Summary — ADIM B (Atomic Red Team Capstone)
+# Detection Coverage Summary — Atomic Red Team Capstone
 
 Six MITRE ATT&CK techniques (seven counting the two sub-techniques scored separately in the AD-recon step) were tested against this lab's live Wazuh/Sysmon/Suricata/Shuffle stack. Scores below use [DeTT&CT](https://github.com/rabobank-cdc/DeTTECT)'s own official detection scoring scale — DeTT&CT (Detect Tactics, Techniques & Combat Threats), developed and maintained by Rabobank's CDC team, is the industry-standard open-source framework for scoring and visualizing ATT&CK-based detection coverage, and is the tool this project has designated for pre/post capstone coverage comparison.
 
