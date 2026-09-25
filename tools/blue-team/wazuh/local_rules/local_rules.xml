@@ -127,7 +127,6 @@
     <options>no_full_log</options>
     <description>Process $(win.eventdata.sourceImage) accessed $(win.eventdata.targetImage) with GrantedAccess $(win.eventdata.grantedAccess) — mask consistent with process injection (T1055)</description>
     <mitre><id>T1055</id></mitre>
-    <group>atomic_red_team_detections,</group>
   </rule>
 
   <rule id="100230" level="14">
@@ -139,7 +138,16 @@
     <mitre>
       <id>T1055</id>
     </mitre>
-    <group>atomic_red_team_detections,</group>
+  </rule>
+
+  <rule id="100240" level="14">
+    <if_group>sysmon_event7</if_group>
+    <field name="win.eventdata.image" type="pcre2">(?i)\\rundll32\.exe$</field>
+    <field name="win.eventdata.originalFileName" type="pcre2">(?i)^comsvcs\.dll$</field>
+    <description>Sysmon - comsvcs.dll loaded via rundll32.exe (potential LSASS memory dump, T1003.001)</description>
+    <mitre>
+      <id>T1003.001</id>
+    </mitre>
   </rule>
 
 </group>
