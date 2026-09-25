@@ -48,3 +48,98 @@
     <group>misp_hash_check,</group>
   </rule>
 </group>
+
+<group name="ruleset_corrections,">
+
+  <rule id="92032" level="3" overwrite="yes">
+    <if_sid>92031, 61603</if_sid>
+    <field name="win.eventdata.parentImage" type="pcre2">(?i)cmd\.EXE</field>
+    <field name="win.eventdata.parentCommandLine" type="pcre2">(?i)\s\/C\s</field>
+    <options>no_full_log</options>
+    <description>Suspicious Windows cmd shell execution (generic parent/child pattern only, no command-content inspection — MITRE tags intentionally omitted per CISA/MITRE ATT&CK mapping guidance: insufficient evidence for T1087/T1059.003)</description>
+    <group>ruleset_corrections,sysmon,sysmon_eid1_detections,windows,</group>
+  </rule>
+
+  <rule id="61618" level="12" overwrite="yes">
+    <if_group>sysmon_event1</if_group>
+    <field name="win.eventdata.image">svchost.exe</field>
+    <description>Sysmon - Suspicious Process - svchost.exe (generic image-name match only, no access-rights or process-relationship inspection — MITRE tag intentionally omitted per CISA/MITRE ATT&CK mapping guidance: insufficient evidence for T1055. Proper T1055 detection requires Sysmon Event 8/10 + AccessMask correlation per MITRE DET0508)</description>
+    <group>ruleset_corrections,windows,sysmon,sysmon_process-anomalies,</group>
+  </rule>
+
+  <rule id="87702" level="10" frequency="18" timeframe="45" ignore="240" overwrite="yes">
+    <if_matched_sid>87701</if_matched_sid>
+    <same_source_ip />
+    <description>Multiple pfSense firewall blocks events from same source (port/protocol-agnostic; not attributed to a specific technique — see local override rationale).</description>
+    <group>ruleset_corrections,</group>
+  </rule>
+
+  <rule id="92910" level="12" overwrite="yes">
+    <if_group>sysmon_event_10</if_group>
+    <field name="win.eventdata.targetImage" type="pcre2">(?i)explorer\.exe</field>
+    <field name="win.eventdata.grantedAccess" type="pcre2">(?i)^0x(40|1fffff|1010|1438|143a|1f0fff|147a|0820)$</field>
+    <options>no_full_log</options>
+    <description>Explorer process was accessed by $(win.eventdata.sourceImage) with GrantedAccess $(win.eventdata.grantedAccess) — mask consistent with process injection (T1055)</description>
+    <mitre><id>T1055</id></mitre>
+    <group>ruleset_corrections,</group>
+  </rule>
+
+  <rule id="92920" level="14" overwrite="yes">
+    <if_group>sysmon_event_10</if_group>
+    <field name="win.eventdata.targetImage" type="pcre2">(?i)mstsc\.exe</field>
+    <field name="win.eventdata.grantedAccess" type="pcre2">(?i)^0x(40|1fffff|1010|1438|143a|1f0fff|147a|0820)$</field>
+    <options>no_full_log</options>
+    <description>Windows Remote Desktop utility process was accessed by $(win.eventdata.sourceImage) with GrantedAccess $(win.eventdata.grantedAccess) — mask consistent with process injection (T1055)</description>
+    <mitre><id>T1055</id></mitre>
+    <group>ruleset_corrections,</group>
+  </rule>
+
+</group>
+
+<group name="atomic_red_team_detections,">
+
+  <rule id="100190" level="6">
+    <if_sid>61603</if_sid>
+    <field name="win.eventdata.originalFileName" type="pcre2">^net\.exe$|^net1\.exe$</field>
+    <field name="win.eventdata.commandLine" type="pcre2">view</field>
+    <field name="win.eventdata.commandLine" negate="yes" type="pcre2">\\\\</field>
+    <description>Share and session enumeration via net.exe/net1.exe "view" flag (T1018 Remote System Discovery) — ported from SigmaHQ proc_creation_win_net_view_share_and_sessions_enum.yml (id 62510e69), validated against Atomic Red Team T1018 Test #1</description>
+    <mitre>
+      <id>T1018</id>
+    </mitre>
+    <group>attack_discovery,sigma_ported,</group>
+  </rule>
+
+  <rule id="100200" level="12">
+    <if_sid>61603</if_sid>
+    <field name="win.eventdata.commandLine" type="pcre2">(?i)domainlist|trustdmp|dcmodes|adinfo|-sc dclist|computer_pwdnotreqd|objectcategory=|-subnets -f|name="Domain Admins"|-sc u:|domainncs|dompol| oudmp |subnetdmp|gpodmp|fspdmp|users_noexpire|computers_active|computers_pwdnotreqd</field>
+    <description>AdFind (or renamed equivalent) execution with common AD-recon flags (T1087.002 Domain Account Discovery) — ported from SigmaHQ proc_creation_win_pua_adfind_susp_usage.yml (id 9a132afa), validated against Atomic Red Team T1087.002 Test #7</description>
+    <mitre>
+      <id>T1087.002</id>
+    </mitre>
+    <group>attack_discovery,sigma_ported,</group>
+  </rule>
+
+  <rule id="100220" level="12">
+    <if_group>sysmon_event_10</if_group>
+    <field name="win.eventdata.grantedAccess" type="pcre2">(?i)^0x(40|1fffff|1010|1438|143a|1f0fff|147a|0820)$</field>
+    <field name="win.eventdata.sourceImage" type="pcre2" negate="yes">(?i)(MsMpEng\.exe|procmon\.exe|procmon64\.exe|procexp\.exe|procexp64\.exe|wininit\.exe|csrss\.exe|services\.exe)</field>
+    <options>no_full_log</options>
+    <description>Process $(win.eventdata.sourceImage) accessed $(win.eventdata.targetImage) with GrantedAccess $(win.eventdata.grantedAccess) — mask consistent with process injection (T1055)</description>
+    <mitre><id>T1055</id></mitre>
+    <group>atomic_red_team_detections,</group>
+  </rule>
+
+  <rule id="100230" level="14">
+    <if_group>sysmon_event8</if_group>
+    <match>StartModule: -</match>
+    <field name="win.eventdata.sourceImage" type="pcre2" negate="yes">(?i)(MsMpEng\.exe|WmiPrvSE\.exe|csrss\.exe|wininit\.exe)</field>
+    <options>no_full_log</options>
+    <description>CreateRemoteThread from $(win.eventdata.sourceImage) into $(win.eventdata.targetImage) with unresolved StartModule/StartFunction - strong indicator of shellcode/memory-backed injection (T1055)</description>
+    <mitre>
+      <id>T1055</id>
+    </mitre>
+    <group>atomic_red_team_detections,</group>
+  </rule>
+
+</group>
