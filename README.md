@@ -10,6 +10,7 @@ bugs found and fixed, and real live-traffic verification — the goal is
 to show how the system was reasoned about, not just that it runs.
 
 **📄 Live documentation: [k0zzi.github.io/soc-lab-portfolio](https://k0zzi.github.io/soc-lab-portfolio/)**
+**🎯 Atomic Red Team findings: [tools/red-team/findings/](tools/red-team/findings/)**
 
 ## Scope
 
