@@ -16,8 +16,10 @@
 <!--
   misp-network-ioc: Sysmon Event 3 (network connection).
   Base rule 61605 stays at its default level (built-in ruleset, level 0) —
-  NOT overridden here. Only external (non-RFC1918/loopback/link-local)
-  destination IPs are elevated to level 3 and sent to MISP correlation.
+  NOT overridden here. Destinations in RFC1918, IPv4 loopback, link-local and
+  multicast ranges are excluded; all other destination IPs are elevated to level 3
+  and sent to MISP correlation. This is a volume pre-filter, not a complete
+  external-only test (other special-purpose ranges are not excluded).
 -->
 <group name="local,sysmon,misp_correlation,">
   <rule id="100180" level="3">
@@ -113,7 +115,7 @@
   <rule id="100200" level="12">
     <if_sid>61603</if_sid>
     <field name="win.eventdata.commandLine" type="pcre2">(?i)domainlist|trustdmp|dcmodes|adinfo|-sc dclist|computer_pwdnotreqd|objectcategory=|-subnets -f|name="Domain Admins"|-sc u:|domainncs|dompol| oudmp |subnetdmp|gpodmp|fspdmp|users_noexpire|computers_active|computers_pwdnotreqd</field>
-    <description>AdFind (or renamed equivalent) execution with common AD-recon flags (T1087.002 Domain Account Discovery) — ported from SigmaHQ proc_creation_win_pua_adfind_susp_usage.yml (id 9a132afa), validated against Atomic Red Team T1087.002 Test #7</description>
+    <description>AdFind (or renamed equivalent) execution with common AD-recon flags (T1087.002 Account Discovery: Domain Account) — ported from SigmaHQ proc_creation_win_pua_adfind_susp_usage.yml (id 9a132afa), validated against Atomic Red Team T1087.002 Test #7</description>
     <mitre>
       <id>T1087.002</id>
     </mitre>
