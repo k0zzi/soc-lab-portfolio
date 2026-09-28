@@ -150,4 +150,14 @@
     </mitre>
   </rule>
 
+  <rule id="100250" level="12">
+    <if_sid>61603</if_sid>
+    <field name="win.eventdata.commandLine" type="pcre2">(?i)^(?=.*comsvcs)(?=.*full)(?:(?=.*rundll32)(?=.*(?:#-|#\+|#24|24 |minidump|#65560))|(?=.*24)(?=.*(?: #|,#|, #|"#)))</field>
+    <description>Process memory dump via comsvcs.dll using rundll32 (MiniDump/ordinal, potential LSASS dump, T1003.001) — ported from SigmaHQ proc_creation_win_rundll32_process_dump_via_comsvcs.yml (id 646ea171)</description>
+    <mitre>
+      <id>T1003.001</id>
+    </mitre>
+    <group>attack_credential_access,sigma_ported,</group>
+  </rule>
+
 </group>
