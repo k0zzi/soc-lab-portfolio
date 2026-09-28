@@ -7,10 +7,11 @@ community configuration for Windows endpoint telemetry (Sysmon). See
 `THIRD-PARTY-LICENSE.md` in this folder for the MIT license and
 attribution.
 
-`sysmonconfig.xml` in this folder is the live configuration, pulled
-directly off the endpoint via `Sysmon64.exe -c`, rather than a static
-copy of the upstream download — it reflects whatever customizations
-are actually in effect on the deployed agents.
+`sysmonconfig.xml` in this folder is the configuration deployed to the
+lab endpoints via GPO: the balanced output of sysmon-modular, as
+generated upstream and not modified locally. Lab-specific detection
+logic lives in the Wazuh rules (`local_rules.xml`), not in the Sysmon
+config.
 
 For how Sysmon itself gets rolled out (GPO-based, shared install
 script, agent-side `agent.conf` wiring to read the Sysmon Operational
@@ -28,9 +29,10 @@ choice, not a gap in this lab's Wazuh rules.
 
 ## Wazuh-side customizations
 
-See `local_rules.xml` in the neighboring folder. Three custom child
-rules sit on top of the base Sysmon event-mapping rules (which stay at
-their default level, usually 0):
+See `local_rules.xml` in the neighboring folder. The three rules below
+are child rules that feed the MISP correlation workflows. They sit on
+top of the base Sysmon event-mapping rules (which stay at their default
+level, usually 0):
 
 | Rule ID | Base (`if_sid`) | Sysmon Event | Purpose |
 |---------|------------------|--------------|---------|
@@ -38,9 +40,12 @@ their default level, usually 0):
 | 100170  | 61603            | 1 (Process creation) | Forwards every process hash to the SOAR hash-correlation workflow. |
 | 100180  | 61605            | 3 (Network connection) | Filters out RFC1918/loopback/link-local destinations, forwarding only external connections. |
 
-(The MISP threat-intel correlation these rules feed into isn't part of
-the `docs/` build series yet — it's a later phase of the project,
-documented here at the rule level in the meantime.)
+`local_rules.xml` also holds the detection rules and default-rule
+corrections written during the Atomic Red Team capstone. Those are
+documented per technique in `tools/red-team/findings/`.
+
+The MISP threat-intel correlation these rules feed into is covered in
+`docs/08-misp-threat-intel.html`.
 
 ## A bug found the hard way: an unfiltered rule flooding the SOAR
 
