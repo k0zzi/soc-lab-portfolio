@@ -22,7 +22,7 @@
 <group name="local,sysmon,misp_correlation,">
   <rule id="100180" level="3">
     <if_sid>61605</if_sid>
-    <field name="win.eventdata.destinationIp" type="pcre2" negate="yes">^(10\.|172\.(1[6-9]|2[0-9]|3[0-1])\.|192\.168\.|127\.|169\.254\.|::1|fe80:)</field>
+    <field name="win.eventdata.destinationIp" type="pcre2" negate="yes">^(10\.|172\.(1[6-9]|2[0-9]|3[0-1])\.|192\.168\.|127\.|169\.254\.|::1|fe80:|2(2[4-9]|3[0-9])\.|ff[0-9a-f]{2}:)</field>
     <description>Sysmon Event 3: Network connection to external IP $(win.eventdata.destinationIp) by $(win.eventdata.image) - MISP correlation candidate</description>
     <options>no_full_log</options>
     <group>misp_network_check,</group>
