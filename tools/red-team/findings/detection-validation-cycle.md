@@ -19,15 +19,15 @@ Four prerequisites were completed before any technique was run, in this order:
 
 **Objectives and TTP selection** were grounded in official guidance, matching Praetorian's own "Finalize Objectives" and "TTP Creation" stages. MITRE Engenuity's Center for Threat-Informed Defense (CTID) explicitly names attempting full ATT&CK matrix coverage **"ATT&CK bingo"** and calls it counterproductive; its own prioritization criteria are prevalence, choke point, and actionability. Applying those criteria, the six techniques were cross-validated across independent source categories: commercial malware-sample analysis (Picus Security's Red Report, 2023 and 2026), confirmed SOC detections (Red Canary's Threat Detection Report, "Forever Techniques"), and real government red-team assessment outcomes (CISA's Risk and Vulnerability Assessment infographics, FY21 and FY23), in which all six chosen (sub-)techniques appear as named, top-tier entries rather than CISA's own long-tail "Other" category.
 
-The run order followed MITRE ATT&CK's own tactic sequence (Execution → Defense Evasion/Privilege Escalation → Credential Access → Discovery), matching how MITRE's own ATT&CK Evaluations program structures adversary emulation as a chronological scenario.
+The run order followed MITRE ATT&CK's own tactic sequence (Execution → Privilege Escalation/Stealth → Credential Access → Discovery), matching how MITRE's own ATT&CK Evaluations program structures adversary emulation as a chronological scenario.
 
 ## 2. TTP Execution
 
 | Technique | Tactic | Detected during execution? | Evidence |
 |---|---|---|---|
 | [T1059.001](./T1059.001.md) | Execution | ✅ Yes | Wazuh rule 92057, real-time, correctly tagged |
-| [T1218](./T1218.md) | Defense Evasion | ❌ No | Zero Sysmon telemetry generated |
-| [T1055](./T1055.md) | Defense Evasion / Priv Esc | ❌ No | Telemetry existed; no rule inspected it |
+| [T1218](./T1218.md) | Stealth | ❌ No | Zero Sysmon telemetry generated |
+| [T1055](./T1055.md) | Stealth / Priv Esc | ❌ No | Telemetry existed; no rule inspected it |
 | [T1003.001](./T1003.001.md) | Credential Access | Prevented before reaching an identifiable state | Defender + RunAsPPL |
 | [T1018](./T1018-T1087.002.md) | Discovery | ✅ Yes | Wazuh's default ruleset (92034/92035), before any custom rule existed |
 | [T1087.002](./T1018-T1087.002.md) | Discovery | ✅ Yes (after tuning — see Section 4) | Only visible by name after rule 100200 was deployed |
