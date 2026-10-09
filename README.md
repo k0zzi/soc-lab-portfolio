@@ -17,12 +17,24 @@ to show how the system was reasoned about, not just that it runs.
 - **SIEM**: Wazuh (Sysmon-based endpoint telemetry, Suricata IDS/IPS
   network telemetry), tuned with the Olaf Hartong sysmon-modular
   community config plus custom correlation rules.
-- **SOAR**: Shuffle workflows correlating Wazuh alerts (network, DNS,
-  and process-hash indicators) against MISP threat intel, with
-  deduplication and fail-closed error handling.
+- **Threat intelligence matching**: MISP indicators (IPv4 addresses and
+  domain names) are exported by a script into Wazuh CDB lists and matched
+  locally on the manager, so only matches leave the SIEM instead of every
+  event being looked up in MISP. DNS names are normalized (ASCII-only case
+  folding, trailing dot, IDNA) and matched on label boundaries, including
+  subdomains of domain-type indicators. See
+  [tools/blue-team/wazuh/misp-ioc-sync/](tools/blue-team/wazuh/misp-ioc-sync/).
+- **SOAR**: Shuffle workflows turn IOC matches into TheHive alerts (for
+  domains, one alert per match; TheHive groups repeats by shared
+  observable). The original per-event workflows, which query MISP for every
+  network, DNS or process-hash event with deduplication and fail-closed
+  error handling, remain exported here and still serve process-hash
+  correlation.
 - **Case management**: TheHive + Cortex for incident triage.
-- **Detection-as-code**: Sigma rules, version-controlled, CI-scanned
-  for secrets before merge.
+- **Detection-as-code**: Sigma and Wazuh rules, version-controlled,
+  CI-scanned for secrets before merge. The MISP sync script, the domain
+  matching integration, the Shuffle node code and the acceptance harness
+  have unit tests (standard library only).
 - **Adversary emulation & detection validation**: Atomic Red Team
   techniques run against live telemetry — each result (caught, missed,
   or prevented) traced to a specific root cause and cross-checked
@@ -35,8 +47,15 @@ to show how the system was reasoned about, not just that it runs.
 ```
 tools/
   blue-team/
-    wazuh/     — local detection rules + Sysmon config
-    shuffle/   — exported SOAR workflows (network/DNS/hash IOC correlation)
+    wazuh/
+      local_rules/           — local detection rules (Suricata, Sysmon, Atomic Red Team, MISP IOC)
+      sysmon/                — Sysmon config and notes
+      misp-ioc-sync/         — MISP to Wazuh CDB list export, with tests and design notes
+      custom-integrations/   — domain matching integration (normalization, subdomains), with tests
+      validation/            — acceptance harness for the domain IOC rules, with tests
+    shuffle/
+      shuffle-workflows/     — exported SOAR workflows (original per-event IOC correlation)
+      misp-domain-workflow/  — Shuffle node code and TheHive request body for the domain workflow
     thehive/   — case-management integration notes
     sigma/     — SIEM-agnostic detection rules (Sigma format)
   red-team/
@@ -56,4 +75,11 @@ used alongside gitleaks CI.
 
 ## Status
 
-Work in progress. See the [live documentation](https://k0zzi.github.io/soc-lab-portfolio/) or the `docs/` folder for completed build steps.
+Work in progress. IPv4 and domain matching are live. Process-hash matching,
+IPv6/CIDR indicators and enforcement (firewall alias, DNS blocklist) are not
+done yet. The MISP page under `docs/` still describes the original per-event
+design; the local-matching redesign is described in
+[tools/blue-team/wazuh/misp-ioc-sync/](tools/blue-team/wazuh/misp-ioc-sync/)
+until that page is updated.
+
+See the [live documentation](https://k0zzi.github.io/soc-lab-portfolio/) or the `docs/` folder for completed build steps.
