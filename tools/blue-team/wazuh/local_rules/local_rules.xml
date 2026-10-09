@@ -58,14 +58,14 @@
     <field name="win.eventdata.parentImage" type="pcre2">(?i)cmd\.EXE</field>
     <field name="win.eventdata.parentCommandLine" type="pcre2">(?i)\s\/C\s</field>
     <options>no_full_log</options>
-    <description>Suspicious Windows cmd shell execution (generic parent/child pattern only, no command-content inspection — MITRE tags intentionally omitted per CISA/MITRE ATT&CK mapping guidance: insufficient evidence for T1087/T1059.003)</description>
+    <description>Suspicious Windows cmd shell execution (generic parent/child pattern only, no command-content inspection — MITRE tags intentionally omitted per CISA/MITRE ATT&amp;CK mapping guidance: insufficient evidence for T1087/T1059.003)</description>
     <group>ruleset_corrections,sysmon,sysmon_eid1_detections,windows,</group>
   </rule>
 
   <rule id="61618" level="12" overwrite="yes">
     <if_group>sysmon_event1</if_group>
     <field name="win.eventdata.image">svchost.exe</field>
-    <description>Sysmon - Suspicious Process - svchost.exe (generic image-name match only, no access-rights or process-relationship inspection — MITRE tag intentionally omitted per CISA/MITRE ATT&CK mapping guidance: insufficient evidence for T1055. Proper T1055 detection requires Sysmon Event 8/10 + AccessMask correlation per MITRE DET0508)</description>
+    <description>Sysmon - Suspicious Process - svchost.exe (generic image-name match only, no access-rights or process-relationship inspection — MITRE tag intentionally omitted per CISA/MITRE ATT&amp;CK mapping guidance: insufficient evidence for T1055. Proper T1055 detection requires Sysmon Event 8/10 + AccessMask correlation per MITRE DET0508)</description>
     <group>ruleset_corrections,windows,sysmon,sysmon_process-anomalies,</group>
   </rule>
 
@@ -162,4 +162,107 @@
     <group>attack_credential_access,sigma_ported,</group>
   </rule>
 
+</group>
+
+<group name="misp_ioc,">
+
+  <!-- Tier 1: IPs from published MISP events -->
+  <rule id="100301" level="10">
+    <if_sid>61605</if_sid>
+    <list field="win.eventdata.destinationIp" lookup="address_match_key">etc/lists/misp-ip-t1</list>
+    <description>MISP IOC (tier 1): outbound connection to $(win.eventdata.destinationIp)</description>
+    <group>misp_ioc_t1,</group>
+  </rule>
+
+  <!-- Tier 2: IPs from unpublished MISP events (raw blocklists) -->
+  <rule id="100302" level="7">
+    <if_sid>61605</if_sid>
+    <list field="win.eventdata.destinationIp" lookup="address_match_key">etc/lists/misp-ip-t2</list>
+    <description>MISP IOC (tier 2): outbound connection to $(win.eventdata.destinationIp)</description>
+    <group>misp_ioc_t2,</group>
+  </rule>
+
+</group>
+
+<group name="misp_ioc_ps,">
+
+  <!-- PowerShell TCP connections are swallowed by the stock level-0 rule 92101.
+       The IOC rules are written as its children (same pattern as stock 92102/92103). -->
+  <rule id="100304" level="10">
+    <if_sid>92101</if_sid>
+    <list field="win.eventdata.destinationIp" lookup="address_match_key">etc/lists/misp-ip-t1</list>
+    <description>MISP IOC (tier 1, PowerShell): outbound connection to $(win.eventdata.destinationIp)</description>
+    <group>misp_ioc_t1,</group>
+  </rule>
+
+  <rule id="100305" level="7">
+    <if_sid>92101</if_sid>
+    <list field="win.eventdata.destinationIp" lookup="address_match_key">etc/lists/misp-ip-t2</list>
+    <description>MISP IOC (tier 2, PowerShell): outbound connection to $(win.eventdata.destinationIp)</description>
+    <group>misp_ioc_t2,</group>
+  </rule>
+
+</group>
+
+<group name="misp_ioc_sync,">
+
+  <!-- Output of misp_ioc_sync.py as run by the Wazuh command module (location: command_misp-ioc-sync) -->
+  <rule id="100310" level="0">
+    <location>command_misp-ioc-sync</location>
+    <match>"program":"misp-ioc-sync"</match>
+    <description>MISP IOC sync event</description>
+  </rule>
+
+  <rule id="100311" level="3">
+    <if_sid>100310</if_sid>
+    <match>"result":"ok"</match>
+    <description>MISP IOC sync finished OK</description>
+  </rule>
+
+  <rule id="100312" level="12">
+    <if_sid>100310</if_sid>
+    <match>"result":"error"</match>
+    <description>MISP IOC sync FAILED, the reason is in full_log</description>
+    <group>misp_ioc_sync_failure,</group>
+  </rule>
+
+</group>
+
+<group name="misp_ioc_domain,">
+  <rule id="100320" level="10">
+    <if_sid>61650</if_sid>
+    <list field="win.eventdata.queryName" lookup="match_key">etc/lists/misp-domain-t1</list>
+    <description>MISP IOC (tier 1): DNS query for $(win.eventdata.queryName)</description>
+    <group>misp_ioc_domain_t1,</group>
+  </rule>
+  <rule id="100321" level="7">
+    <if_sid>61650</if_sid>
+    <list field="win.eventdata.queryName" lookup="match_key">etc/lists/misp-domain-t2</list>
+    <description>MISP IOC (tier 2): DNS query for $(win.eventdata.queryName)</description>
+    <group>misp_ioc_domain_t2,</group>
+  </rule>
+</group>
+
+<group name="misp_ioc_domain_script,">
+  <rule id="100322" level="10">
+    <decoded_as>json</decoded_as>
+    <field name="integration">^custom-misp-domain$</field>
+    <field name="misp_domain.tier">^t1$</field>
+    <description>MISP IOC (tier 1, $(misp_domain.match_kind) match): DNS query $(misp_domain.query) matched $(misp_domain.matched)</description>
+    <group>misp_ioc_domain_t1,</group>
+  </rule>
+  <rule id="100323" level="7">
+    <decoded_as>json</decoded_as>
+    <field name="integration">^custom-misp-domain$</field>
+    <field name="misp_domain.tier">^t2$</field>
+    <description>MISP IOC (tier 2, $(misp_domain.match_kind) match): DNS query $(misp_domain.query) matched $(misp_domain.matched)</description>
+    <group>misp_ioc_domain_t2,</group>
+  </rule>
+  <rule id="100324" level="12">
+    <decoded_as>json</decoded_as>
+    <field name="integration">^custom-misp-domain$</field>
+    <field name="misp_domain_error">.+</field>
+    <description>custom-misp-domain integration failed: $(misp_domain_error)</description>
+    <group>misp_ioc_domain_error,</group>
+  </rule>
 </group>
