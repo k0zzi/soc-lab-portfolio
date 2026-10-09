@@ -1,0 +1,159 @@
+#!/var/ossec/framework/python/bin/python3
+# -*- coding: utf-8 -*-
+"""
+custom-misp-domain  (v0.1)
+
+Wazuh custom integration (integratord runs it once per matching alert).
+Input : an alert of rule 100160 (one per Sysmon Event 22 DNS query), as a JSON file
+        whose path is argv[1].
+Output: when the queried name matches a MISP domain list, ONE event is written back
+        to the manager's local queue socket, attributed to the agent that asked. Rules
+        100322 / 100323 turn it into an alert; rule 100324 reports a script failure.
+
+Why it exists: Wazuh CDB lookups are exact and case-sensitive and cannot do suffix
+matching, and a decoder cannot post-process Windows event fields. This script adds the
+missing part of the match, nothing else.
+
+Matching (language independent, RFC 4343):
+  * case: only the ASCII letters A-Z are folded, never a language-specific mapping
+    (Turkish dotted/dotless i, Latin-1 accents ...). No locale and no str.lower() is used.
+  * one trailing dot is ignored.
+  * names with non-ASCII characters go through the IDNA transformation to their ASCII
+    form (xn--...), the same transformation the list builder (misp_ioc_sync.py) applies.
+  * the full name is looked up first, in any list entry type. Then the parent names,
+    always on a label boundary and never down to the bare TLD, but ONLY against entries
+    of type "domain" (a MISP "hostname" entry means that exact host only).
+  * tier 1 is searched before tier 2.
+
+The lists are the plain files written by misp_ioc_sync.py ("name:domain" or
+"name:hostname", sorted). They are read with a byte search, not loaded into a dict.
+"""
+import json
+import os
+import socket
+import string
+import sys
+import time
+
+NAME = "custom-misp-domain"
+LOCATION = "misp-domain"
+PWD = os.path.dirname(os.path.dirname(os.path.realpath(__file__)))     # /var/ossec
+LISTS = os.path.join(PWD, "etc", "lists")
+SOCKET_ADDR = os.path.join(PWD, "queue", "sockets", "queue")
+LOG_FILE = os.path.join(PWD, "logs", "integrations.log")
+TIERS = ("t1", "t2")
+ASCII_FOLD = str.maketrans(string.ascii_uppercase, string.ascii_lowercase)
+
+
+def log(msg):
+    try:
+        with open(LOG_FILE, "a") as fh:
+            fh.write("%s %s: %s\n" % (time.strftime("%Y-%m-%d %H:%M:%S"), NAME, msg))
+    except OSError:
+        pass
+
+
+def normalize(name):
+    """ASCII-only case fold, one trailing dot dropped, IDNA for non-ASCII."""
+    n = name.translate(ASCII_FOLD)
+    if n.endswith("."):
+        n = n[:-1]
+    if not n.isascii():
+        try:
+            n = n.encode("idna").decode("ascii").translate(ASCII_FOLD)
+        except UnicodeError:
+            return n, False
+    return n, True
+
+
+def candidates(n):
+    labels = n.split(".")
+    # the name itself, then its parents with at least two labels left
+    return [n] + [".".join(labels[i:]) for i in range(1, len(labels) - 1)]
+
+
+def read_list(tier):
+    with open(os.path.join(LISTS, "misp-domain-%s" % tier), "rb") as fh:
+        return b"\n" + fh.read()
+
+
+def find(blob, cand):
+    """Entry type for cand, or None. The key starts at a line start and ends at ':', so
+    'evil.com' can never match inside 'notevil.com'."""
+    key = ("\n" + cand + ":").encode("utf-8")
+    i = blob.find(key)
+    if i < 0:
+        return None
+    j = i + len(key)
+    k = blob.find(b"\n", j)
+    value = blob[j:k if k >= 0 else len(blob)].decode("ascii", "replace").strip()
+    return value if value in ("domain", "hostname") else "hostname"      # unknown: exact only
+
+
+def match(n, blobs):
+    cands = candidates(n)
+    for tier in TIERS:
+        for idx, cand in enumerate(cands):
+            typ = find(blobs[tier], cand)
+            if typ is None:
+                continue
+            if idx == 0:
+                return tier, cand, "exact", typ
+            if typ == "domain":
+                return tier, cand, "suffix", typ
+    return None
+
+
+def send_event(payload, agent):
+    msg = json.dumps(payload, separators=(",", ":"), ensure_ascii=True)
+    if not agent or agent.get("id") in (None, "", "000"):
+        line = "1:%s:%s" % (LOCATION, msg)
+    else:
+        line = "1:[%s] (%s) %s->%s:%s" % (agent["id"], agent.get("name", "?"),
+                                           agent.get("ip", "any"), LOCATION, msg)
+    sock = socket.socket(socket.AF_UNIX, socket.SOCK_DGRAM)
+    try:
+        sock.connect(SOCKET_ADDR)
+        sock.send(line.encode("utf-8"))
+    finally:
+        sock.close()
+
+
+def main(argv):
+    if len(argv) < 2:
+        log("no alert file argument")
+        return 1
+    agent = None
+    try:
+        with open(argv[1], "r", encoding="utf-8") as fh:
+            alert = json.load(fh)
+        agent = alert.get("agent")
+        query = (((alert.get("data") or {}).get("win") or {}).get("eventdata") or {}).get("queryName")
+        if not query or not isinstance(query, str):
+            return 0                                  # not a DNS query alert: nothing to do
+        n, idna_ok = normalize(query)
+        if not n or not idna_ok:
+            return 0                                  # cannot be on a list (lists hold A-labels)
+        hit = match(n, {t: read_list(t) for t in TIERS})
+        if hit is None:
+            return 0
+        tier, matched, kind, typ = hit
+        send_event({"integration": NAME,
+                    "misp_domain": {"tier": tier, "query": query, "normalized": n,
+                                    "matched": matched, "match_kind": kind, "entry_type": typ,
+                                    "source_rule": str((alert.get("rule") or {}).get("id", "")),
+                                    "source_alert": str(alert.get("id", ""))}}, agent)
+        return 0
+    except Exception as exc:                          # fail visible: report, never swallow
+        text = "%s: %s" % (type(exc).__name__, exc)
+        log("FAILED: " + text)
+        try:
+            send_event({"integration": NAME, "misp_domain_error": text[:300]}, agent)
+            return 0
+        except Exception as exc2:
+            log("FAILED to report the failure: %s: %s" % (type(exc2).__name__, exc2))
+            return 1
+
+
+if __name__ == "__main__":
+    sys.exit(main(sys.argv))
