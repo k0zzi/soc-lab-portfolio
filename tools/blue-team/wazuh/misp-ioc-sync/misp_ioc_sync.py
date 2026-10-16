@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
 """
-misp_ioc_sync.py  (v0.5.1)
+misp_ioc_sync.py  (v0.7.1)
 
 Pulls actionable indicators from MISP (attributes/restSearch, text format) and
 writes them as Wazuh CDB list files on the Wazuh manager:
@@ -20,8 +20,21 @@ Design (see the IOC-matching roadmap):
     An indicator present in both tiers is kept in t1 only.
     NOTE: "published" is a publication-state flag in MISP, not a quality signal;
     treating it as a curation proxy is a local heuristic.
-  * Filters: to_ids=1, excludeDecayed with modelOverrides, optional
-    enforceWarninglist.
+  * Filters: to_ids=1, decay with modelOverrides (lifetime/threshold), optional
+    enforceWarninglist. Two retrieval modes, chosen separately for the IP lists
+    ([filters] retrieval) and the domain lists ([filters] domain_retrieval):
+        text-bulk   one large text export per type and tier, MISP applies the
+                    decay filter and the warninglists (v0.5 behaviour)
+        json-paged  paged JSON (the pattern of the Microsoft Sentinel MISP connector:
+                    paged JSON, warninglists enforced by MISP, decay decided from
+                    the scores MISP returns): decay decided here
+                    from the decay scores MISP returns (includeDecayScore with the
+                    same modelOverrides, "not decayed" under decaying model N)
+    On MISP 2.5.40 the bulk text export was measured to be wrong in two places:
+    with enforceWarninglist it dropped ~35,000 tier 2 IPs that MISP's own
+    warninglist check does not flag, and with excludeDecayed it dropped ~19,000
+    tier 1 ip-dst|port IPs that MISP's single-value query keeps. The paged JSON
+    path agreed with MISP's single-value decisions in every sample taken.
   * Domain normalisation (CDB matching is exact, hash based, no subdomain
     matching): values are lower-cased, one trailing dot is removed, and
     wildcards, IP literals, single-label names, internal suffixes, non-ASCII
@@ -58,7 +71,7 @@ import time
 import urllib.error
 import urllib.request
 
-__version__ = "0.5.1"
+__version__ = "0.7.1"
 PROG = "misp-ioc-sync"
 DEFAULT_CONF = "/etc/misp-ioc-sync/misp-ioc-sync.conf"
 FALLBACK_STATUS_LOG = "/var/log/misp-ioc-sync.log"
@@ -112,6 +125,12 @@ DEFAULTS = {
     "threshold": 10,
     "lifetime": 365,
     "enforce_warninglist": True,
+    "retrieval": "text-bulk",            # IP lists: text-bulk | json-paged
+    "domain_retrieval": "text-bulk",     # domain lists: text-bulk | json-paged
+    "decay_model_id": 1,                 # MISP decaying model whose score decides (json-paged)
+    "json_page_size": 5000,
+    "json_max_pages": 600,
+    "json_empty_pages": 5,               # stop after this many empty pages in a row
     "list_dir": "/var/ossec/etc/lists",
     "prefix": "misp-ip",
     "domain_prefix": "misp-domain",
@@ -158,6 +177,18 @@ def load_config(path, explicit):
             "lifetime": cp.getint("filters", "lifetime", fallback=cfg["lifetime"]),
             "enforce_warninglist": cp.getboolean("filters", "enforce_warninglist",
                                                  fallback=cfg["enforce_warninglist"]),
+            "retrieval": cp.get("filters", "retrieval",
+                                fallback=cfg["retrieval"]).strip().lower(),
+            "domain_retrieval": cp.get("filters", "domain_retrieval",
+                                       fallback=cfg["domain_retrieval"]).strip().lower(),
+            "decay_model_id": cp.getint("filters", "decay_model_id",
+                                        fallback=cfg["decay_model_id"]),
+            "json_page_size": cp.getint("filters", "json_page_size",
+                                        fallback=cfg["json_page_size"]),
+            "json_max_pages": cp.getint("filters", "json_max_pages",
+                                        fallback=cfg["json_max_pages"]),
+            "json_empty_pages": cp.getint("filters", "json_empty_pages",
+                                          fallback=cfg["json_empty_pages"]),
             "list_dir": cp.get("output", "list_dir", fallback=cfg["list_dir"]),
             "prefix": cp.get("output", "prefix", fallback=cfg["prefix"]),
             "domain_prefix": cp.get("output", "domain_prefix",
@@ -182,6 +213,15 @@ def load_config(path, explicit):
         raise SyncError("config error: [filters] domain_types is empty")
     if cfg["reload"] not in ("none", "hot"):
         raise SyncError("config error: [output] reload must be 'hot' or 'none'")
+    if (cfg["retrieval"] not in ("text-bulk", "json-paged")
+            or cfg["domain_retrieval"] not in ("text-bulk", "json-paged")):
+        raise SyncError("config error: [filters] retrieval and domain_retrieval "
+                        "must be 'text-bulk' or 'json-paged'")
+    if (cfg["json_page_size"] < 100 or cfg["json_max_pages"] < 1
+            or cfg["json_empty_pages"] < 1 or cfg["decay_model_id"] < 1):
+        raise SyncError("config error: [filters] json_page_size >= 100, "
+                        "json_max_pages >= 1, json_empty_pages >= 1, "
+                        "decay_model_id >= 1")
     return cfg
 
 
@@ -262,6 +302,92 @@ def misp_query(cfg, key, payload):
         raise SyncError("unexpected JSON body for text export (%s): %s"
                         % (desc, body[:200].replace("\n", " ")))
     return code, body, time.time() - t0
+
+
+def misp_json_rows(cfg, key, typ, published, enforce):
+    """Fetch every attribute of one (type, tier) as paged JSON.
+
+    The server-side decay filter is NOT used: MISP applies filters after paging,
+    which leaves leading pages empty. With decay wanted the query asks for the
+    decay scores instead (the modelOverrides stay in the payload, so the scores
+    use the configured lifetime and threshold). Returns (rows, pages, seconds)."""
+    payload = build_payload(typ, published, cfg, enforce=enforce)
+    payload.pop("excludeDecayed", None)
+    payload["returnFormat"] = "json"
+    payload["limit"] = cfg["json_page_size"]
+    if cfg["exclude_decayed"]:
+        payload["includeDecayScore"] = 1
+    url = cfg["url"] + "/attributes/restSearch"
+    ctx = None
+    if url.lower().startswith("https"):
+        if cfg["verify_tls"]:
+            ctx = ssl.create_default_context(cafile=cfg["ca_file"] or None)
+        else:
+            ctx = ssl._create_unverified_context()  # noqa: SLF001 (lab PKI)
+    desc = "type=%s published=%s (json pages)" % (typ, published)
+    rows, empty, page, t0 = [], 0, 1, time.time()
+    while empty < cfg["json_empty_pages"]:
+        if page > cfg["json_max_pages"]:
+            raise SyncError("JSON paging did not finish within %d pages (%s)"
+                            % (cfg["json_max_pages"], desc))
+        payload["page"] = page
+        req = urllib.request.Request(
+            url, data=json.dumps(payload).encode("utf-8"), method="POST",
+            headers={"Authorization": key, "Accept": "application/json",
+                     "Content-Type": "application/json"})
+        try:
+            with urllib.request.urlopen(req, timeout=cfg["timeout"], context=ctx) as resp:
+                body = resp.read().decode("utf-8", "replace")
+        except urllib.error.HTTPError as exc:
+            snippet = exc.read(200).decode("utf-8", "replace").replace("\n", " ")
+            raise SyncError("HTTP %s from MISP (%s page %d): %s"
+                            % (exc.code, desc, page, snippet))
+        except (urllib.error.URLError, OSError) as exc:
+            raise SyncError("MISP connection error (%s page %d): %s" % (desc, page, exc))
+        try:
+            got = json.loads(body)["response"]["Attribute"]
+        except (ValueError, KeyError, TypeError):
+            raise SyncError("unexpected JSON shape from MISP (%s page %d): %s"
+                            % (desc, page, body[:200].replace("\n", " ")))
+        if got:
+            empty = 0
+            rows.extend(got)
+        else:
+            empty += 1
+        page += 1
+    return rows, page - 1, time.time() - t0
+
+
+def decay_alive(row, model_id):
+    """True/False from MISP's own decayed flag for one decaying model, None if the
+    row carries no score for that model."""
+    scores = [d for d in row.get("decay_score", [])
+              if str((d.get("DecayingModel") or {}).get("id")) == str(model_id)]
+    if not scores:
+        return None
+    return any(not d.get("decayed", True) for d in scores)
+
+
+def rows_to_text(cfg, rows, desc):
+    """Client-side decay: keep values that are not decayed. Returns
+    (text, rows_without_score, rows_dropped_as_decayed). Fails closed when the
+    decaying model is missing (every row without a score would silently vanish)."""
+    if not cfg["exclude_decayed"]:
+        return "\n".join(str(a.get("value", "")) for a in rows), 0, 0
+    keep, noscore, dropped = [], 0, 0
+    for a in rows:
+        alive = decay_alive(a, cfg["decay_model_id"])
+        if alive is None:
+            noscore += 1
+        elif alive:
+            keep.append(str(a.get("value", "")))
+        else:
+            dropped += 1
+    if rows and noscore > 0.01 * len(rows):
+        raise SyncError("decay guard: %d of %d rows (%s) carry no score for decaying "
+                        "model %d (disabled or wrong id?); nothing written"
+                        % (noscore, len(rows), desc, cfg["decay_model_id"]))
+    return "\n".join(keep), noscore, dropped
 
 
 # --------------------------------------------------------------------------
@@ -519,7 +645,21 @@ def fetch_kind(cfg, key, args, result, kind):
         data = {}
         agg = None
         for typ in cfg[spec["types_key"]]:
-            code, body, secs = misp_query(cfg, key, build_payload(typ, published, cfg))
+            jq = {}
+            mode = cfg["retrieval"] if kind == "ip" else cfg["domain_retrieval"]
+            if mode == "json-paged":
+                desc = "%s %s %s" % (kind, tier, typ)
+                rows, pages, secs = misp_json_rows(cfg, key, typ, published,
+                                                   cfg["enforce_warninglist"])
+                body, noscore, dropped = rows_to_text(cfg, rows, desc)
+                code = 200
+                jq = {"json_pages": pages, "rows": len(rows),
+                      "decayed_dropped": dropped, "rows_without_score": noscore}
+                if noscore:
+                    result.setdefault("warnings", []).append(
+                        "%s: %d rows without a decay score were left out" % (desc, noscore))
+            else:
+                code, body, secs = misp_query(cfg, key, build_payload(typ, published, cfg))
             items, st = spec["parse"](body)
             agg = dict(st) if agg is None else {k: agg[k] + st[k] for k in st}
             label = spec["label"](typ)
@@ -528,9 +668,14 @@ def fetch_kind(cfg, key, args, result, kind):
                     data[it] = label
             q = {"kind": kind, "tier": tier, "type": typ, "http": code,
                  "seconds": round(secs, 1), "lines": st["raw"], "usable_unique": len(items)}
+            q.update(jq)
             if args.report_warninglist_effect and cfg["enforce_warninglist"]:
-                _c, body_raw, _s = misp_query(
-                    cfg, key, build_payload(typ, published, cfg, enforce=False))
+                if mode == "json-paged":
+                    rows_raw, _p, _s = misp_json_rows(cfg, key, typ, published, False)
+                    body_raw, _n, _d = rows_to_text(cfg, rows_raw, desc)
+                else:
+                    _c, body_raw, _s = misp_query(
+                        cfg, key, build_payload(typ, published, cfg, enforce=False))
                 raw_items, _st = spec["parse"](body_raw)
                 q["without_warninglist"] = len(raw_items)
                 q["removed_by_warninglists"] = len(raw_items - items)
@@ -629,6 +774,9 @@ def print_summary(status):
             q["lines"], q["usable_unique"])
         if "removed_by_warninglists" in q:
             line += " warninglist-removed=%d" % q["removed_by_warninglists"]
+        if "json_pages" in q:
+            line += " json: rows=%d pages=%d decayed-dropped=%d" % (
+                q["rows"], q["json_pages"], q["decayed_dropped"])
         out.write(line + "\n")
     for tier, t in status.get("tiers", {}).items():
         out.write("  ip tier %s: written=%s previous=%s changed=%s dropped(non-global)=%s "

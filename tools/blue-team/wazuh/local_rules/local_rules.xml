@@ -266,3 +266,45 @@
     <group>misp_ioc_domain_error,</group>
   </rule>
 </group>
+
+<!--
+  MISP IOC matching on OPNsense firewall logs (decoded by the stock "pf" decoder).
+  Both ends of the connection are checked (srcip and dstip); allowed and blocked traffic
+  are both matched, the action is shown in the description. These groups are alert-only:
+  nothing here is forwarded to Shuffle/TheHive yet.
+
+  Levels: 10 = tier 1, 7 = tier 2, the same convention as rules 100301/100302/100304/100305.
+  This is a local convention, not a vendor value (Sentinel's firewall analytic rules use one
+  fixed severity; Splunk ES scales risk by threat-list weight). Keep both levels below any
+  catch-all integration level filter (a level 13 filter existed in ossec.conf when this was
+  checked on 2026-10-14), otherwise these alerts would be forwarded.
+-->
+<group name="misp_ioc_fw,">
+  <rule id="100330" level="10">
+    <if_sid>87700</if_sid>
+    <list field="dstip" lookup="address_match_key">etc/lists/misp-ip-t1</list>
+    <description>MISP IOC (tier 1, firewall $(action)): $(srcip) to $(dstip):$(dstport) ($(protocol))</description>
+    <group>misp_ioc_fw_t1,</group>
+  </rule>
+
+  <rule id="100331" level="10">
+    <if_sid>87700</if_sid>
+    <list field="srcip" lookup="address_match_key">etc/lists/misp-ip-t1</list>
+    <description>MISP IOC (tier 1, firewall $(action)): $(srcip) to $(dstip):$(dstport) ($(protocol))</description>
+    <group>misp_ioc_fw_t1,</group>
+  </rule>
+
+  <rule id="100332" level="7">
+    <if_sid>87700</if_sid>
+    <list field="dstip" lookup="address_match_key">etc/lists/misp-ip-t2</list>
+    <description>MISP IOC (tier 2, firewall $(action)): $(srcip) to $(dstip):$(dstport) ($(protocol))</description>
+    <group>misp_ioc_fw_t2,</group>
+  </rule>
+
+  <rule id="100333" level="7">
+    <if_sid>87700</if_sid>
+    <list field="srcip" lookup="address_match_key">etc/lists/misp-ip-t2</list>
+    <description>MISP IOC (tier 2, firewall $(action)): $(srcip) to $(dstip):$(dstport) ($(protocol))</description>
+    <group>misp_ioc_fw_t2,</group>
+  </rule>
+</group>
