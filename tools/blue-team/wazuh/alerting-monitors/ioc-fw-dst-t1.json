@@ -1,0 +1,126 @@
+{
+  "type": "monitor",
+  "name": "ioc-fw-dst-t1",
+  "monitor_type": "bucket_level_monitor",
+  "enabled": true,
+  "schedule": {
+    "period": {
+      "interval": 1,
+      "unit": "MINUTES"
+    }
+  },
+  "inputs": [
+    {
+      "search": {
+        "indices": [
+          "wazuh-alerts-*"
+        ],
+        "query": {
+          "size": 0,
+          "query": {
+            "bool": {
+              "filter": [
+                {
+                  "term": {
+                    "rule.id": "100330"
+                  }
+                },
+                {
+                  "range": {
+                    "timestamp": {
+                      "gte": "now-5d"
+                    }
+                  }
+                }
+              ]
+            }
+          },
+          "aggregations": {
+            "g": {
+              "terms": {
+                "field": "data.dstip",
+                "size": 100
+              },
+              "aggregations": {
+                "first": {
+                  "min": {
+                    "field": "timestamp"
+                  }
+                },
+                "last": {
+                  "max": {
+                    "field": "timestamp"
+                  }
+                },
+                "agent": {
+                  "terms": {
+                    "field": "agent.name",
+                    "size": 20
+                  }
+                },
+                "rule": {
+                  "terms": {
+                    "field": "rule.id",
+                    "size": 10
+                  }
+                },
+                "ids": {
+                  "terms": {
+                    "field": "id",
+                    "size": 50,
+                    "order": {
+                      "_key": "desc"
+                    }
+                  }
+                },
+                "action": {
+                  "terms": {
+                    "field": "data.action",
+                    "size": 10
+                  }
+                },
+                "port": {
+                  "terms": {
+                    "field": "data.dstport",
+                    "size": 50
+                  }
+                },
+                "proto": {
+                  "terms": {
+                    "field": "data.protocol",
+                    "size": 10
+                  }
+                },
+                "src": {
+                  "terms": {
+                    "field": "data.srcip",
+                    "size": 50
+                  }
+                }
+              }
+            }
+          }
+        }
+      }
+    }
+  ],
+  "triggers": [
+    {
+      "bucket_level_trigger": {
+        "name": "t",
+        "severity": "3",
+        "condition": {
+          "buckets_path": {
+            "doc_count": "_count"
+          },
+          "parent_bucket_path": "g",
+          "script": {
+            "source": "params.doc_count > 0",
+            "lang": "painless"
+          }
+        },
+        "actions": []
+      }
+    }
+  ]
+}

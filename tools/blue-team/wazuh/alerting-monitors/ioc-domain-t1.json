@@ -1,0 +1,120 @@
+{
+  "type": "monitor",
+  "name": "ioc-domain-t1",
+  "monitor_type": "bucket_level_monitor",
+  "enabled": true,
+  "schedule": {
+    "period": {
+      "interval": 1,
+      "unit": "MINUTES"
+    }
+  },
+  "inputs": [
+    {
+      "search": {
+        "indices": [
+          "wazuh-alerts-*"
+        ],
+        "query": {
+          "size": 0,
+          "query": {
+            "bool": {
+              "filter": [
+                {
+                  "terms": {
+                    "rule.id": [
+                      "100320",
+                      "100322"
+                    ]
+                  }
+                },
+                {
+                  "range": {
+                    "timestamp": {
+                      "gte": "now-5d"
+                    }
+                  }
+                }
+              ]
+            }
+          },
+          "aggregations": {
+            "g": {
+              "terms": {
+                "script": {
+                  "lang": "painless",
+                  "source": "doc.containsKey('data.misp_domain.matched') && doc['data.misp_domain.matched'].size() > 0 ? doc['data.misp_domain.matched'].value : (doc.containsKey('data.win.eventdata.queryName') && doc['data.win.eventdata.queryName'].size() > 0 ? doc['data.win.eventdata.queryName'].value : 'unknown')"
+                },
+                "size": 100
+              },
+              "aggregations": {
+                "first": {
+                  "min": {
+                    "field": "timestamp"
+                  }
+                },
+                "last": {
+                  "max": {
+                    "field": "timestamp"
+                  }
+                },
+                "agent": {
+                  "terms": {
+                    "field": "agent.name",
+                    "size": 20
+                  }
+                },
+                "rule": {
+                  "terms": {
+                    "field": "rule.id",
+                    "size": 10
+                  }
+                },
+                "ids": {
+                  "terms": {
+                    "field": "id",
+                    "size": 50,
+                    "order": {
+                      "_key": "desc"
+                    }
+                  }
+                },
+                "query": {
+                  "terms": {
+                    "field": "data.misp_domain.query",
+                    "size": 50
+                  }
+                },
+                "kind": {
+                  "terms": {
+                    "field": "data.misp_domain.match_kind",
+                    "size": 10
+                  }
+                }
+              }
+            }
+          }
+        }
+      }
+    }
+  ],
+  "triggers": [
+    {
+      "bucket_level_trigger": {
+        "name": "t",
+        "severity": "3",
+        "condition": {
+          "buckets_path": {
+            "doc_count": "_count"
+          },
+          "parent_bucket_path": "g",
+          "script": {
+            "source": "params.doc_count > 0",
+            "lang": "painless"
+          }
+        },
+        "actions": []
+      }
+    }
+  ]
+}
