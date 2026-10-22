@@ -14,8 +14,8 @@ from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 SCRIPT = os.environ.get("MISP_HASH_SLOTS", os.path.join(HERE, "..", "misp_hash_slots.py"))
-KEY = "MISPKEY-abcdef0123456789"
-PASSWORD = "Idx-Passw0rd-xyz987"
+KEY = "YOUR-MISP-KEY-HERE"
+PASSWORD = "YOUR-INDEXER-PASSWORD-HERE"
 USER = "ioc_hash_writer"
 INDEX = "ioc-hash-slots"
 LENGTHS = {"md5": 32, "sha1": 40, "sha256": 64}
