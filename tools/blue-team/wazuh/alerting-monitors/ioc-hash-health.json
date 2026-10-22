@@ -1,0 +1,65 @@
+{
+  "name": "ioc-hash-health",
+  "type": "monitor",
+  "monitor_type": "query_level_monitor",
+  "enabled": true,
+  "schedule": {
+    "period": {
+      "interval": 1,
+      "unit": "MINUTES"
+    }
+  },
+  "inputs": [
+    {
+      "search": {
+        "indices": [
+          "wazuh-alerts-*"
+        ],
+        "query": {
+          "size": 0,
+          "track_total_hits": true,
+          "query": {
+            "bool": {
+              "filter": [
+                {
+                  "range": {
+                    "timestamp": {
+                      "gte": "now-30m"
+                    }
+                  }
+                },
+                {
+                  "exists": {
+                    "field": "data.win.eventdata.hashes"
+                  }
+                }
+              ],
+              "must_not": [
+                {
+                  "exists": {
+                    "field": "ioc_hash.sha256"
+                  }
+                }
+              ]
+            }
+          }
+        }
+      }
+    }
+  ],
+  "triggers": [
+    {
+      "query_level_trigger": {
+        "name": "ioc_hash_missing",
+        "severity": "2",
+        "condition": {
+          "script": {
+            "source": "ctx.results[0].hits.total.value > 0",
+            "lang": "painless"
+          }
+        },
+        "actions": []
+      }
+    }
+  ]
+}

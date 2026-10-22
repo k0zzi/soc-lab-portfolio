@@ -13,6 +13,10 @@ MISP -> CDB lists (misp-ioc-sync) -> Wazuh rules (Sysmon IP, DNS, firewall) -> w
      -> one TheHive alert per engine alert
 ```
 
+The hash monitors work the same way over `ioc_hash.*` fields that an ingest pipeline adds to the alerts; see the
+[alerting monitors](../../wazuh/alerting-monitors/), the [ingest hook](../../wazuh/ingest/) and the
+[slot writer](../../wazuh/misp-hash-slots/).
+
 ## What a TheHive alert contains
 
 | Field | Value |
@@ -20,21 +24,21 @@ MISP -> CDB lists (misp-ioc-sync) -> Wazuh rules (Sysmon IP, DNS, firewall) -> w
 | Title | `Threat Activity Detected (<indicator>, <source list>, <reporting hosts>)`, at most 256 bytes |
 | `sourceRef` | the engine alert id; `<id>\|<last seen ms>` for an alert opened after an analyst closed the previous one |
 | `date` | first seen in the monitor window at creation |
-| Tags | `misp-ioc`, `tier1`, `wazuh`, `ioc:<indicator>`, `engine-alert:<id>`, `monitor:<name>` |
-| Observable | the indicator (`ip` or `domain`) |
+| Tags | `misp-ioc`, `tier1`, `wazuh`, `ioc:<indicator>`, `engine-alert:<id>`, `monitor:<name>`, and `hash-type:<type>` for hash monitors |
+| Observable | the indicator (`ip`, `domain` or `hash`; a hash observable also carries `hash-type:<type>`) |
 | Description | header, monitor, engine alert id and state, when the engine alert opened, alarms in the window, first/last seen, match side, **Details** value lists, then the **MISP context** section |
 | Summary | `count=N first=<UTC> last=<UTC>` |
 | Comments | never written; they stay for analysts. TheHive's History tab records every update |
 
-**Details** lists show `value (count)` for action, protocol, port, source IP, destination IP, process,
-DNS query, match kind, reporting host and rules, plus the latest alarm ids, capped at 2 KB combined
+**Details** lists show `value (count)` for action, protocol, port, source IP, destination IP, process, parent process,
+event id, DNS query, match kind, reporting host and rules, plus the latest alarm ids, capped at 2 KB combined
 (least frequent values go first, oldest alarm ids first). Protocol and port are separate lists because a
 bucket aggregation cannot pair them.
 
 **MISP context** comes from a live `attributes/restSearch` for the indicator (published events, IDS flag,
 the same decay overrides the list sync uses) and lists the events (id, info, creating organisation,
 date, analysis state), attribute types and categories, tags, comments, first/last seen when MISP has
-them, the decay score under the lists' own policy, and links to the events. Example:
+them, the decay score under the lists' own policy (only when MISP returns one for the attribute), and links to the events. Example:
 
 ```
 **MISP context** (live MISP query: published events, IDS flag)
@@ -89,6 +93,7 @@ them. Analysts own status, assignee, comments and tags; the reader never changes
 - **No cross-family merge.** The same indicator seen by two monitors gives two alerts; merging is a case-level action.
 - **Firewall alerts show raw addresses.** The internal client is a plain IP; the reporting host is the firewall.
 - **MISP context is a live query**, with no confidence value and no threat level (see above).
+- Hash alerts exist for SHA256, MD5 and SHA1 only. IMPHASH is not matched (see the monitors README).
 - Tier 1 indicators only; the tier 2 list is not mirrored.
 
 ## Verification
@@ -100,10 +105,16 @@ new activity opening a new alert, an acknowledged engine alert keeps updating th
 MISP context section written into the alerts (3 and 2 attributes found; the rendered section was checked in
 TheHive on one of them), a MISP 403 (wrong credential node) reported per alert in a dry run.
 
+Live (lab, 22 Oct 2026, reader 1.5): a hash alert for a SHA256 value that was placed into a slot as a control.
+TheHive accepted the observable type `hash`; the tags including `hash-type:sha256`, the Details lists with
+process, parent process and event id, and the MISP section for a value that MISP does not know were checked
+in TheHive. The engine alert completed when the control value was removed from the slot.
+
 Only against fakes: the lifecycle of imported alerts with open or closed cases, the 256-byte title, 2 KB
 details and 2 KB context bounds with hundreds of values, a failing Alerting query for one state,
 the behaviour when MISP is down or unreachable (alert still written, existing section kept), the
-sanitising and defanging of MISP text, missing MISP credentials.
+sanitising and defanging of MISP text, missing MISP credentials, the alert content of the MD5 and SHA1
+monitors, and MISP context for a hash that MISP does know.
 
 Not verified: monitor content for `ioc-fw-src-t1`, `ioc-sysmon-ip-t1` and `ioc-domain-t1` on real
 alarms, the Shuffle run-quota impact of a 60 s schedule (about 43,200 runs per 30 days if the unit is
@@ -115,7 +126,8 @@ indicators (only IP indicators were seen live).
 1. Map the reserved `alerting_read_access` role to the read-only indexer user:
    `PUT _plugins/_security/api/rolesmapping/alerting_read_access` with `{"users": ["<user>"]}`
    (check first that the mapping does not exist; the request replaces it).
-2. Create the four monitors from [`../../wazuh/alerting-monitors/`](../../wazuh/alerting-monitors/).
+2. Create the monitors from [`../../wazuh/alerting-monitors/`](../../wazuh/alerting-monitors/): four for IP
+   addresses and domains, three for hashes (the hash monitors need the slot index and its documents first).
 3. In a Shuffle workflow add three HTTP nodes that only carry credentials, plus the Python node:
    - `http_1`: `username` and `password` parameters of the indexer account,
    - `http_2`: `headers` parameter `Authorization: Bearer <TheHive service account key>`,
@@ -130,7 +142,7 @@ indicators (only IP indicators were seen live).
 
 Constants at the top of the script: `SOURCE`, `ALERT_TYPE`, `INDEXER_URL`, `THEHIVE_URL`, `MISP_URL`,
 `MISP_NODE`, `MISP_DECAY` and `MISP_DECAY_MODEL` (keep them equal to the list sync's decay settings),
-`MONITORS` (monitor name to indicator type, source list and match side), `READ_STATES`, `MAX_ALERTS`
+`MONITORS` (monitor name to indicator type, source list, match side and, for hashes, label and hash type), `READ_STATES`, `MAX_ALERTS`
 (500 per state), `MAX_TITLE_BYTES`, `MAX_DETAILS_BYTES`, `MAX_CONTEXT_BYTES`, `MAX_RUN_SECONDS`.
 
 ## Tests
@@ -140,8 +152,8 @@ python3 tests/test_ioc_alert_reader.py
 ```
 
 Standard library only; it starts a fake Alerting API, a fake TheHive and a fake MISP on 127.0.0.1 and
-runs 88 checks. During development 31 deliberate faults were injected into the node and each one was
-caught (the harness is not part of this repository).
+runs 129 checks. During development deliberate faults were injected into the node (31 for the original
+version, 14 more for the hash monitors) and each one was caught (the harness is not part of this repository).
 
 ## Sources
 

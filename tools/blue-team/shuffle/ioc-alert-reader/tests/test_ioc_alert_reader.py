@@ -539,5 +539,142 @@ check("T14 no comment endpoint, no case-folding calls, no cache use, no secrets 
 check("T14 DRY_RUN ships as True", SRC.count("DRY_RUN = True") == 1)
 check("T14 only GET to the alerting API, ACTIVE and ACKNOWLEDGED requested", all(g.startswith("/_plugins/_alerting/monitors/alerts?") and ("alertState=ACTIVE" in g or "alertState=ACKNOWLEDGED" in g) for g in W.gets) and len(W.gets) == 2, W.gets)
 
+# ---------------------------------------------------------------------------
+# H: hash monitors (v1.4)
+# ---------------------------------------------------------------------------
+H256 = "15cd209c995b7d3009c91ca40892d5b8f1fb162f3e5f10716642ea278e8e0d7b"
+HMD5 = "040194d8b98280c088c5b435eda3dd1f"
+HSHA1 = "a80c0c7fa18b61b33f34ebdfa6b5927dc6344fa8"
+HIMP = "f34d5f2d4577ed6d9ceec516c1f5a744"   # an import hash value; no monitor handles it
+IMG = "C:\\Windows\\System32\\cmd.exe"
+PAR = "C:\\Program Files (x86)\\ossec-agent\\wazuh-agent.exe"
+
+
+def hash_alert(aid, monitor, key, count=59, last=BASE + 5000, agent=(("CLT601", 59),), state="ACTIVE", **extra):
+    lists = dict(rule=[("92052", count)], event=[("1", count)], image=[(IMG, count)], parent=[(PAR, count)],
+                 ids=[("1792499837.43550994", 1), ("1792499320.43086261", 1)])
+    lists.update(extra)
+    return eng(aid, monitor, key, count, BASE, last, agent=agent, state=state, **lists)
+
+
+# H1 a SHA256 alert end to end
+reset()
+W.engine = [hash_alert("H1", "ioc-hash-sha256-t1", H256)]
+r = run()
+a = alerts_for(H256)[0] if alerts_for(H256) else {}
+check("H1 one alert created, no errors", len(r["created"]) == 1 and r["errors"] == [], r)
+check("H1 title keeps the pattern; the indicator is the full hash",
+      a.get("title") == "Threat Activity Detected (%s, misp-hash-t1, CLT601)" % H256, a.get("title"))
+check("H1 observable is the hash with type hash", [(o["dataType"], o["data"]) for o in a.get("observables", [])] == [("hash", H256)], a.get("observables"))
+check("H1 tags carry indicator, engine alert, monitor and hash type",
+      {"ioc:" + H256, "engine-alert:H1", "monitor:ioc-hash-sha256-t1", "hash-type:sha256"} <= set(a.get("tags", [])), a.get("tags"))
+check("H1 the observable carries the hash type tag too", "hash-type:sha256" in (a.get("observables") or [{}])[0].get("tags", []), a.get("observables"))
+check("H1 sourceRef is the engine alert id, date the first seen", a.get("sourceRef") == "H1" and a.get("date") == BASE, a)
+d = a.get("description", "")
+check("H1 description header names the hash type and the list",
+      d.splitlines()[0] == "**Threat Activity Detected** | SHA256 hash `%s` | source misp-hash-t1" % H256 if d else False, d[:200])
+for line in ("- Process: " + IMG + " (59)", "- Parent process: " + PAR + " (59)", "- Event ID: 1 (59)",
+             "- Reported by: CLT601 (59)", "- Rules: 92052 (59)", "- Match side: SHA256 (Sysmon hashes field)",
+             "- Alarm IDs (latest 2): 1792499837.43550994, 1792499320.43086261"):
+    check("H1 description line: " + line[:50], line in d.splitlines(), d)
+check("H1 nothing written to comments", W.comments == [])
+
+# H2 every hash monitor is accepted and labelled
+for mon, htype, key, label in (("ioc-hash-sha256-t1", "sha256", H256, "SHA256 hash"), ("ioc-hash-md5-t1", "md5", HMD5, "MD5 hash"),
+                               ("ioc-hash-sha1-t1", "sha1", HSHA1, "SHA1 hash")):
+    reset()
+    W.engine = [hash_alert("X", mon, key)]
+    r = run()
+    al = alerts_for(key)
+    ok = len(al) == 1 and r["ignored_monitor"] == 0 and r["errors"] == []
+    check("H2 %s: accepted, one alert, no errors" % mon, ok, r)
+    if al:
+        a = al[0]
+        check("H2 %s: hash-type tag and observable type" % mon, "hash-type:" + htype in a["tags"] and a["observables"][0]["dataType"] == "hash", a["tags"])
+        check("H2 %s: header label and list" % mon, ("| %s `%s` | source misp-hash-t1" % (label, key)) in a["description"].splitlines()[0], a["description"][:160])
+        check("H2 %s: no other hash type tag" % mon, [t for t in a["tags"] if t.startswith("hash-type:")] == ["hash-type:" + htype], a["tags"])
+
+# H3 IP and domain alerts are unchanged: no hash tag, no hash-only detail lines
+reset()
+W.engine = [fw_alert(), eng("E2", "ioc-domain-t1", "ioc-test.example", 3, BASE, BASE + 1000, agent=(("CLT601", 3),), rule=[("100322", 3)])]
+run()
+for ind in ("1.2.3.4", "ioc-test.example"):
+    a = alerts_for(ind)[0]
+    check("H3 %s alert has no hash tag and no hash-only lines" % ind,
+          not any(t.startswith("hash-type:") for t in a["tags"]) and "Parent process" not in a["description"] and "Event ID" not in a["description"]
+          and not any(t.startswith("hash-type:") for t in a["observables"][0]["tags"]), a["tags"])
+
+# H4 the title stays within 256 bytes and keeps the whole hash
+reset()
+agents = tuple(("HOST-%03d" % i, 100 - i) for i in range(60))
+W.engine = [hash_alert("H4", "ioc-hash-sha256-t1", H256, agent=agents)]
+run()
+t = alerts_for(H256)[0]["title"]
+check("H4 hash title within 256 bytes, whole hash kept, cut announced", len(t.encode()) <= 256 and H256 in t and "HOST-000" in t and re.search(r" \+\d+\)$", t), t)
+
+# H5 MISP context for a hash: queried by value, no decay line when MISP gives no decay score
+reset()
+W.engine = [hash_alert("H5", "ioc-hash-sha256-t1", H256)]
+W.misp_fn = lambda v: [dict(mattr("9", "sha256", "31", "Malware sample", cat="Payload delivery"), decay_score=[]),
+                       dict(mattr("10", "filename|sha256", "31", "Malware sample", cat="Payload delivery"), decay_score=[])]
+r = run()
+d = alerts_for(H256)[0]["description"]
+check("H5 MISP is queried with the hash value", len(W.misp_requests) == 1 and W.misp_requests[0][0]["value"] == H256, W.misp_requests)
+check("H5 context lists the attribute types of the hash", "- Attributes: sha256 (1), filename|sha256 (1) | Category: Payload delivery" in d.splitlines(), d[-300:])
+check("H5 no decay line when no decay score is returned", "- Decay (" not in d and r["plan"]["H5"]["misp"] == {"status": "ok", "attributes": 2}, r["plan"])
+
+# H6 an unknown hash monitor is ignored
+reset()
+W.engine = [hash_alert("U1", "ioc-hash-sha512-t1", "a" * 128), hash_alert("U2", "ioc-hash-sha256-t1-test", H256)]
+r = run()
+check("H6 monitors outside the allow-list are ignored, nothing written", r["ignored_monitor"] == 2 and W.alerts == {} and r["errors"] == [], r)
+
+# H7 closed hash alert: new activity opens a new alert that keeps the hash type
+reset()
+W.engine = [hash_alert("H7", "ioc-hash-sha256-t1", H256)]
+run()
+alerts_for(H256)[0]["stage"] = "Closed"
+W.engine = [hash_alert("H7", "ioc-hash-sha256-t1", H256, count=60, last=BASE + 90000)]
+r = run()
+al = alerts_for(H256)
+check("H7 recreated hash alert keeps the hash type and the engine id", len(al) == 2 and len(r["recreated"]) == 1
+      and "hash-type:sha256" in al[1]["tags"] and al[1]["sourceRef"] == "H7|%d" % (BASE + 90000), [a["tags"] for a in al])
+
+# H8 details stay within 2 KB for a hash alert with many processes
+reset()
+many = lambda p, n: [("%s-%03d-" % (p, i) + "x" * 40, 1) for i in range(n)]
+W.engine = [hash_alert("H8", "ioc-hash-sha256-t1", H256, image=many("img", 20), parent=many("par", 20))]
+run()
+desc = alerts_for(H256)[0]["description"]
+block = desc.split("**Details**\n\n", 1)[1].split("\n\n**MISP context**")[0]
+check("H8 hash details block within 2 KB", len(block.encode()) <= 2048, len(block.encode()))
+check("H8 short lists survive the cut", "- Event ID: 1 (59)" in block and "- Reported by: CLT601 (59)" in block and "- Rules: 92052 (59)" in block, block[:300])
+
+# H9 an engine alert without the hash-only sub-aggregations adds no empty lines
+reset()
+W.engine = [eng("H9", "ioc-hash-md5-t1", HMD5, 2, BASE, BASE + 5, agent=(("SRV202", 2),), rule=[("100170", 2)])]
+run()
+d = alerts_for(HMD5)[0]["description"]
+check("H9 missing sub-aggregations produce no Parent process or Event ID line", "Parent process" not in d and "Event ID" not in d and "- Rules: 100170 (2)" in d.splitlines(), d)
+
+# H10 dry run plans the hash alert and writes nothing
+reset()
+W.engine = [hash_alert("H10", "ioc-hash-md5-t1", HMD5)]
+r = run(dry=True)
+check("H10 dry run plans the md5 alert, writes nothing",
+      W.alerts == {} and r["plan"]["H10"]["action"] == "create" and r["plan"]["H10"]["indicator"] == HMD5
+      and r["plan"]["H10"]["title"] == "Threat Activity Detected (%s, misp-hash-t1, CLT601)" % HMD5, r)
+
+# H11 version and configuration
+check("H11 version is 1.5 and exactly three hash monitors are configured with the same list",
+      'VERSION = "1.5"' in SRC and len(re.findall(r'"source": "misp-hash-t1"', SRC)) == 3 and len(re.findall(r'"htype": "', SRC)) == 3, "")
+
+# H12 IMPHASH is not mirrored: an engine alert of an imphash monitor is ignored, nothing is written
+reset()
+W.engine = [hash_alert("I1", "ioc-hash-imphash-t1", HIMP)]
+r = run()
+check("H12 an imphash monitor alert is ignored, nothing written, no error",
+      r["ignored_monitor"] == 1 and W.alerts == {} and r["errors"] == [] and "imphash" not in SRC, r)
+
 print("\n%d checks, %d failed" % (count[0], len(fails)))
 sys.exit(1 if fails else 0)

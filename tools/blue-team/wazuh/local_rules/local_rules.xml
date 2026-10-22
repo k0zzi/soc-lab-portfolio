@@ -308,3 +308,26 @@
     <group>misp_ioc_fw_t2,</group>
   </rule>
 </group>
+
+<group name="misp_hash_slots,">
+
+  <!-- Output of misp_hash_slots.py as run by the Wazuh command module (location: command_misp-hash-slots) -->
+  <rule id="100340" level="0">
+    <location>command_misp-hash-slots</location>
+    <description>MISP hash slots event</description>
+  </rule>
+
+  <rule id="100341" level="3">
+    <if_sid>100340</if_sid>
+    <match>"result": "ok"</match>
+    <description>MISP hash slots written OK</description>
+  </rule>
+
+  <rule id="100342" level="12">
+    <if_sid>100340</if_sid>
+    <match>"result": "error"</match>
+    <description>MISP hash slots FAILED, the reason is in full_log</description>
+    <group>misp_hash_slots_failure,</group>
+  </rule>
+
+</group>

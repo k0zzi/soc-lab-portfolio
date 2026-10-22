@@ -9,7 +9,7 @@ import urllib.request
 from datetime import datetime, timezone
 
 # ---------------------------------------------------------------------------
-# Reader (v1.3): the grouping lives in the Wazuh Alerting monitors (bucket-level monitors,
+# Reader (v1.5): the grouping lives in the Wazuh Alerting monitors (bucket-level monitors,
 # one alert per indicator and monitor, state and counts kept by the engine). This node keeps
 # NO state of its own: it reads the ACTIVE and ACKNOWLEDGED engine alerts through the Alerting API and writes
 # one TheHive alert per engine alert (title, description, summary kept in sync). Credentials
@@ -18,8 +18,10 @@ from datetime import datetime, timezone
 #   THEHIVE_NODE -> Headers parameter holding the "Authorization: Bearer ..." line
 # Nothing is written to the TheHive comment field (it stays for analysts); every update of the
 # title, description and summary is kept by TheHive's History tab.
+# v1.4 added the hash monitors (ioc-hash-sha256-t1, -md5-, -sha1-): same mirroring, the observable type is hash
+# and the hash type (sha256, md5, sha1) is kept in the tags. IMPHASH is not matched (v1.5).
 # ---------------------------------------------------------------------------
-VERSION = "1.3"
+VERSION = "1.5"
 DRY_RUN = True                       # True: plan only, NOTHING is written
 SOURCE = "wazuh-alerting-pilot"      # TheHive alert source (pilot)
 ALERT_TYPE = "wazuh-ioc"
@@ -53,11 +55,18 @@ MONITORS = {
     "ioc-fw-src-t1": {"dtype": "ip", "source": "misp-ip-t1", "side": "source"},
     "ioc-sysmon-ip-t1": {"dtype": "ip", "source": "misp-ip-t1", "side": "destination"},
     "ioc-domain-t1": {"dtype": "domain", "source": "misp-domain-t1", "side": "DNS query"},
+    "ioc-hash-sha256-t1": {"dtype": "hash", "source": "misp-hash-t1", "side": "SHA256 (Sysmon hashes field)",
+                           "label": "SHA256 hash", "htype": "sha256"},
+    "ioc-hash-md5-t1": {"dtype": "hash", "source": "misp-hash-t1", "side": "MD5 (Sysmon hashes field)",
+                        "label": "MD5 hash", "htype": "md5"},
+    "ioc-hash-sha1-t1": {"dtype": "hash", "source": "misp-hash-t1", "side": "SHA1 (Sysmon hashes field)",
+                         "label": "SHA1 hash", "htype": "sha1"},
 }
-TYPE_LABEL = {"ip": "IP", "domain": "Domain"}
+TYPE_LABEL = {"ip": "IP", "domain": "Domain", "hash": "Hash"}
 # bucket sub-aggregation -> label; counted lists show "value (n)", ids are plain
 DETAIL_FIELDS = (("action", "Action", True), ("proto", "Protocol", True), ("port", "Port", True),
                  ("src", "Source IP", True), ("dst", "Destination IP", True), ("image", "Process", True),
+                 ("parent", "Parent process", True), ("event", "Event ID", True),
                  ("query", "DNS query", True), ("kind", "Match kind", True),
                  ("agent", "Reported by", True), ("rule", "Rules", True), ("ids", "Alarm IDs", False))
 SUMMARY_RE = re.compile(r"^count=(\d+) first=(\S+) last=(\S+)$")
@@ -167,7 +176,7 @@ def cell(text):
 
 
 def build_description(engine, mon, indicator, count, first_ms, last_ms, lists):
-    label = TYPE_LABEL.get(mon["dtype"], mon["dtype"])
+    label = mon.get("label") or TYPE_LABEL.get(mon["dtype"], mon["dtype"])
     lines = ["**Threat Activity Detected** | %s `%s` | source %s" % (label, cell(indicator), mon["source"]), "",
              "- Monitor: %s | engine alert %s | state %s" % (engine.get("monitor_name"), engine.get("id"), engine.get("state")),
              "- Engine alert opened (UTC): %s" % iso_ms(to_ms(engine.get("start_time") or 0)),
@@ -454,14 +463,15 @@ def sync(fe):
                     continue
                 out["updated"].append({"engine_alert": engine_id, "fields": sorted(changes)})
             continue
+        type_tags = ["hash-type:" + mon["htype"]] if mon.get("htype") else []
         body_new = {"type": ALERT_TYPE, "source": SOURCE, "sourceRef": source_ref,
                     "title": title, "description": description, "summary": summary,
                     "severity": 2, "tlp": 2, "pap": 2, "date": first_ms,
                     "tags": ["misp-ioc", "tier1", "wazuh", "ioc:" + indicator, tag,
-                             "monitor:" + str(engine.get("monitor_name"))],
+                             "monitor:" + str(engine.get("monitor_name"))] + type_tags,
                     "observables": [{"dataType": mon["dtype"], "data": indicator,
                                      "message": "MISP IOC (tier 1)", "tlp": 2, "ioc": True,
-                                     "sighted": True, "tags": ["misp-ioc", "tier1"]}]}
+                                     "sighted": True, "tags": ["misp-ioc", "tier1"] + type_tags}]}
         st, res = hive("POST", "/api/v1/alert", body_new)
         if st == 201 and isinstance(res, dict):
             (out["recreated"] if action == "recreate" else out["created"]).append(

@@ -1,0 +1,71 @@
+{
+  "description": "IOC hash normalization: split Sysmon hashes into typed lowercase fields (sha1, md5, sha256); archives keep only events 1/29/23/26 with hashes",
+  "processors": [
+    {
+      "kv": {
+        "field": "data.win.eventdata.hashes",
+        "field_split": ",",
+        "value_split": "=",
+        "target_field": "ioc_hash",
+        "include_keys": [
+          "SHA1",
+          "MD5",
+          "SHA256"
+        ],
+        "ignore_missing": true,
+        "ignore_failure": true
+      }
+    },
+    {
+      "rename": {
+        "field": "ioc_hash.SHA1",
+        "target_field": "ioc_hash.sha1",
+        "ignore_missing": true,
+        "ignore_failure": true
+      }
+    },
+    {
+      "rename": {
+        "field": "ioc_hash.MD5",
+        "target_field": "ioc_hash.md5",
+        "ignore_missing": true,
+        "ignore_failure": true
+      }
+    },
+    {
+      "rename": {
+        "field": "ioc_hash.SHA256",
+        "target_field": "ioc_hash.sha256",
+        "ignore_missing": true,
+        "ignore_failure": true
+      }
+    },
+    {
+      "lowercase": {
+        "field": "ioc_hash.sha1",
+        "ignore_missing": true,
+        "ignore_failure": true
+      }
+    },
+    {
+      "lowercase": {
+        "field": "ioc_hash.md5",
+        "ignore_missing": true,
+        "ignore_failure": true
+      }
+    },
+    {
+      "lowercase": {
+        "field": "ioc_hash.sha256",
+        "ignore_missing": true,
+        "ignore_failure": true
+      }
+    },
+    {
+      "drop": {
+        "if": "ctx._index != null && ctx._index.startsWith('wazuh-archives') && (ctx.data?.win?.eventdata?.hashes == null || !['1','29','23','26'].contains(ctx.data?.win?.system?.eventID))",
+        "ignore_failure": true
+      }
+    }
+  ]
+}

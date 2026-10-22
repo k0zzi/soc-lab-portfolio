@@ -1,0 +1,158 @@
+{
+  "name": "ioc-hash-sha256-t1",
+  "type": "monitor",
+  "monitor_type": "bucket_level_monitor",
+  "enabled": true,
+  "schedule": {
+    "period": {
+      "interval": 1,
+      "unit": "MINUTES"
+    }
+  },
+  "inputs": [
+    {
+      "search": {
+        "indices": [
+          "wazuh-alerts-*"
+        ],
+        "query": {
+          "size": 0,
+          "query": {
+            "bool": {
+              "filter": [
+                {
+                  "range": {
+                    "timestamp": {
+                      "gte": "now-5d"
+                    }
+                  }
+                },
+                {
+                  "bool": {
+                    "should": [
+                      {
+                        "terms": {
+                          "ioc_hash.sha256": {
+                            "index": "ioc-hash-slots",
+                            "id": "sha256-1",
+                            "path": "values"
+                          }
+                        }
+                      },
+                      {
+                        "terms": {
+                          "ioc_hash.sha256": {
+                            "index": "ioc-hash-slots",
+                            "id": "sha256-2",
+                            "path": "values"
+                          }
+                        }
+                      },
+                      {
+                        "terms": {
+                          "ioc_hash.sha256": {
+                            "index": "ioc-hash-slots",
+                            "id": "sha256-3",
+                            "path": "values"
+                          }
+                        }
+                      },
+                      {
+                        "terms": {
+                          "ioc_hash.sha256": {
+                            "index": "ioc-hash-slots",
+                            "id": "sha256-4",
+                            "path": "values"
+                          }
+                        }
+                      }
+                    ],
+                    "minimum_should_match": 1
+                  }
+                }
+              ]
+            }
+          },
+          "aggregations": {
+            "g": {
+              "terms": {
+                "field": "ioc_hash.sha256",
+                "size": 100
+              },
+              "aggs": {
+                "first": {
+                  "min": {
+                    "field": "timestamp"
+                  }
+                },
+                "last": {
+                  "max": {
+                    "field": "timestamp"
+                  }
+                },
+                "agent": {
+                  "terms": {
+                    "field": "agent.name",
+                    "size": 20
+                  }
+                },
+                "rule": {
+                  "terms": {
+                    "field": "rule.id",
+                    "size": 10
+                  }
+                },
+                "event": {
+                  "terms": {
+                    "field": "data.win.system.eventID",
+                    "size": 10
+                  }
+                },
+                "image": {
+                  "terms": {
+                    "field": "data.win.eventdata.image",
+                    "size": 20
+                  }
+                },
+                "parent": {
+                  "terms": {
+                    "field": "data.win.eventdata.parentImage",
+                    "size": 20
+                  }
+                },
+                "ids": {
+                  "terms": {
+                    "field": "id",
+                    "size": 50,
+                    "order": {
+                      "_key": "desc"
+                    }
+                  }
+                }
+              }
+            }
+          }
+        }
+      }
+    }
+  ],
+  "triggers": [
+    {
+      "bucket_level_trigger": {
+        "name": "t",
+        "severity": "3",
+        "condition": {
+          "buckets_path": {
+            "doc_count": "_count"
+          },
+          "parent_bucket_path": "g",
+          "script": {
+            "source": "params.doc_count > 0",
+            "lang": "painless"
+          }
+        },
+        "actions": []
+      }
+    }
+  ]
+}
