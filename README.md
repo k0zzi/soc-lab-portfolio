@@ -35,6 +35,15 @@ to show how the system was reasoned about, not just that it runs.
   [tools/blue-team/shuffle/ioc-alert-reader/](tools/blue-team/shuffle/ioc-alert-reader/);
   the monitor definitions are in
   [tools/blue-team/wazuh/alerting-monitors/](tools/blue-team/wazuh/alerting-monitors/).
+- **Hash matching (pilot)**: file hashes do not use the CDB route, because Wazuh's decoders did not split
+  the Sysmon hash string for Windows event-channel events in the lab. An ingest pipeline splits it into typed
+  fields at index time, a script writes the last 30 days of published MISP hash indicators (SHA256, MD5,
+  SHA1) into slot documents in the indexer, and three Alerting monitors compare the fields with those
+  documents through terms lookups; the alert layer above mirrors the result into TheHive. Only events that
+  Wazuh stores as alerts are searched, and IMPHASH is deliberately not matched. See
+  [tools/blue-team/wazuh/misp-hash-slots/](tools/blue-team/wazuh/misp-hash-slots/),
+  [tools/blue-team/wazuh/ingest/](tools/blue-team/wazuh/ingest/) and
+  [tools/blue-team/wazuh/alerting-monitors/](tools/blue-team/wazuh/alerting-monitors/).
 - **SOAR**: Shuffle workflows turn IOC matches into TheHive alerts (for
   domains, one alert per match; TheHive groups repeats by shared
   observable). The original per-event workflows, which query MISP for every
@@ -44,8 +53,8 @@ to show how the system was reasoned about, not just that it runs.
   layer above.
 - **Case management**: TheHive + Cortex for incident triage.
 - **Detection-as-code**: Sigma and Wazuh rules, version-controlled,
-  CI-scanned for secrets before merge. The MISP sync script, the domain
-  matching integration, the Shuffle node code (domain workflow and alert
+  CI-scanned for secrets before merge. The MISP sync script, the hash slot
+  writer, the domain matching integration, the Shuffle node code (domain workflow and alert
   reader) and the acceptance harness have unit tests (standard library only).
 - **Adversary emulation & detection validation**: Atomic Red Team
   techniques run against live telemetry — each result (caught, missed,
@@ -65,7 +74,9 @@ tools/
       misp-ioc-sync/         — MISP to Wazuh CDB list export, with tests and design notes
       custom-integrations/   — domain matching integration (normalization, subdomains), with tests
       validation/            — acceptance harness for the domain IOC rules, with tests
-      alerting-monitors/     — Wazuh Alerting monitors that group IOC alarms per indicator
+      alerting-monitors/     — Wazuh Alerting monitors that group IOC alarms per indicator (IP, domain, hash)
+      misp-hash-slots/       — MISP hash indicators to indexer slot documents for terms lookups, with tests
+      ingest/                — ingest pipeline that splits Sysmon hashes into typed fields, and how to hook it in
     shuffle/
       shuffle-workflows/     — exported SOAR workflows (original per-event IOC correlation)
       misp-domain-workflow/  — Shuffle node code and TheHive request body for the domain workflow
@@ -95,8 +106,10 @@ reader with MISP context have been verified on live traffic; the monitors for
 inbound firewall, Sysmon IP and domain matches have not yet been seen on real
 alarms (details in
 [tools/blue-team/shuffle/ioc-alert-reader/](tools/blue-team/shuffle/ioc-alert-reader/)).
-Process-hash matching, IPv6/CIDR indicators and enforcement (firewall alias,
-DNS blocklist) are not done yet. The MISP page under `docs/` still describes
+Hash matching is a pilot too: the chain from a Sysmon hash to a TheHive alert
+was verified end to end with a control value placed in a slot, but no hash
+listed in MISP has appeared in the lab's events yet. IPv6/CIDR indicators and
+enforcement (firewall alias, DNS blocklist) are not done yet. The MISP page under `docs/` still describes
 the original per-event design; the local-matching redesign is described in
 [tools/blue-team/wazuh/misp-ioc-sync/](tools/blue-team/wazuh/misp-ioc-sync/)
 until that page is updated.
