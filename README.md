@@ -35,6 +35,8 @@ to show how the system was reasoned about, not just that it runs.
   [tools/blue-team/shuffle/ioc-alert-reader/](tools/blue-team/shuffle/ioc-alert-reader/);
   the monitor definitions are in
   [tools/blue-team/wazuh/alerting-monitors/](tools/blue-team/wazuh/alerting-monitors/).
+  The reader also writes a heartbeat record after every run, and a monitor sends a Telegram message when no healthy
+  record is fresh for 10 minutes.
 - **Hash matching (pilot)**: file hashes do not use the CDB route, because Wazuh's decoders did not split
   the Sysmon hash string for Windows event-channel events in the lab. An ingest pipeline splits it into typed
   fields at index time, a script writes the last 30 days of published MISP hash indicators (SHA256, MD5,
@@ -44,13 +46,14 @@ to show how the system was reasoned about, not just that it runs.
   [tools/blue-team/wazuh/misp-hash-slots/](tools/blue-team/wazuh/misp-hash-slots/),
   [tools/blue-team/wazuh/ingest/](tools/blue-team/wazuh/ingest/) and
   [tools/blue-team/wazuh/alerting-monitors/](tools/blue-team/wazuh/alerting-monitors/).
-- **SOAR**: Shuffle workflows turn IOC matches into TheHive alerts (for
-  domains, one alert per match; TheHive groups repeats by shared
-  observable). The original per-event workflows, which query MISP for every
-  network, DNS or process-hash event with deduplication and fail-closed
-  error handling, remain exported here and still serve process-hash
-  correlation. The per-match workflows still run in parallel with the alert
-  layer above.
+- **SOAR**: the alert layer above is the only IOC path into TheHive. The
+  earlier IOC workflows, which queried MISP for every network, DNS or
+  process-hash event with deduplication and fail-closed error handling, and
+  the per-match workflows that created one TheHive alert per match, were
+  switched off on 26 Oct 2026 (their Wazuh integration blocks are disabled);
+  the per-event exports remain here for reference. The port-scan workflow
+  (Suricata scan alert, OPNsense block, TheHive case) is separate and
+  unchanged.
 - **Case management**: TheHive + Cortex for incident triage.
 - **Detection-as-code**: Sigma and Wazuh rules, version-controlled,
   CI-scanned for secrets before merge. The MISP sync script, the hash slot
@@ -74,13 +77,13 @@ tools/
       misp-ioc-sync/         — MISP to Wazuh CDB list export, with tests and design notes
       custom-integrations/   — domain matching integration (normalization, subdomains), with tests
       validation/            — acceptance harness for the domain IOC rules, with tests
-      alerting-monitors/     — Wazuh Alerting monitors that group IOC alarms per indicator (IP, domain, hash)
+      alerting-monitors/     — Wazuh Alerting monitors that group IOC alarms per indicator (IP, domain, hash), plus health and heartbeat monitors
       misp-hash-slots/       — MISP hash indicators to indexer slot documents for terms lookups, with tests
       ingest/                — ingest pipeline that splits Sysmon hashes into typed fields, and how to hook it in
     shuffle/
       shuffle-workflows/     — exported SOAR workflows (original per-event IOC correlation)
       misp-domain-workflow/  — Shuffle node code and TheHive request body for the domain workflow
-      ioc-alert-reader/      — Shuffle node that mirrors the monitors' alerts into TheHive with MISP context, with tests
+      ioc-alert-reader/      — Shuffle node that mirrors the monitors' alerts into TheHive with MISP context and writes a heartbeat, with tests
     thehive/   — case-management integration notes
     sigma/     — SIEM-agnostic detection rules (Sigma format)
   red-team/
@@ -101,10 +104,12 @@ used alongside gitleaks CI.
 ## Status
 
 Work in progress. IPv4 and domain matching are live. The Alerting-based alert
-layer is a pilot: the monitor for firewall destination matches and the TheHive
-reader with MISP context have been verified on live traffic; the monitors for
-inbound firewall, Sysmon IP and domain matches have not yet been seen on real
-alarms (details in
+layer is a pilot: the monitors for firewall destination matches and domain
+matches and the TheHive reader with MISP context have been verified on live
+traffic; the Sysmon IP monitor only with synthetic events sent to the analysis
+socket, and the inbound firewall monitor not yet on real alarms. The reader's
+heartbeat and its Telegram notification were verified by stopping the Shuffle
+orchestrator on purpose (details in
 [tools/blue-team/shuffle/ioc-alert-reader/](tools/blue-team/shuffle/ioc-alert-reader/)).
 Hash matching is a pilot too: the chain from a Sysmon hash to a TheHive alert
 was verified end to end with a control value placed in a slot, but no hash
