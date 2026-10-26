@@ -1,0 +1,82 @@
+{
+  "name": "ioc-reader-heartbeat",
+  "type": "monitor",
+  "monitor_type": "query_level_monitor",
+  "enabled": true,
+  "schedule": {
+    "period": {
+      "interval": 1,
+      "unit": "MINUTES"
+    }
+  },
+  "inputs": [
+    {
+      "search": {
+        "indices": [
+          "ioc-reader-heartbeat"
+        ],
+        "query": {
+          "size": 0,
+          "query": {
+            "bool": {
+              "filter": [
+                {
+                  "ids": {
+                    "values": [
+                      "reader"
+                    ]
+                  }
+                },
+                {
+                  "term": {
+                    "ok": true
+                  }
+                },
+                {
+                  "range": {
+                    "last_run": {
+                      "gte": "now-10m"
+                    }
+                  }
+                }
+              ]
+            }
+          }
+        }
+      }
+    }
+  ],
+  "triggers": [
+    {
+      "query_level_trigger": {
+        "name": "Heartbeat Stopped.",
+        "severity": "1",
+        "condition": {
+          "script": {
+            "source": "ctx.results[0].hits.total.value == 0",
+            "lang": "painless"
+          }
+        },
+        "actions": [
+          {
+            "name": "telegram notify",
+            "destination_id": "<NOTIFICATION_CHANNEL_ID>",
+            "message_template": {
+              "source": "{\n  \"chat_id\": \"<CHAT_ID>\",\n  \"text\": \"Wazuh Monitor {{ctx.monitor.name}} is in ALERT status.\\nTrigger: {{ctx.trigger.name}}\\nSeverity: {{ctx.trigger.severity}}\\nPeriod end: {{ctx.periodEnd}}\\nNo fresh OK heartbeat from the IOC alert reader (Shuffle) in the last 10 minutes. Shuffle Orborus might be stopped.\"\n}",
+              "lang": "mustache"
+            },
+            "throttle_enabled": true,
+            "throttle": {
+              "value": 60,
+              "unit": "MINUTES"
+            },
+            "subject_template": {
+              "source": "Alerting Notification action",
+              "lang": "mustache"
+            }
+          }
+        ]
+      }
+    }
+  ]
+}

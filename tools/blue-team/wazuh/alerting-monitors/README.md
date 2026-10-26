@@ -1,9 +1,9 @@
 # Wazuh Alerting monitors for IOC alerts
 
 Seven bucket-level monitors over `wazuh-alerts-*` (four for IP addresses and domains, three for file hashes)
-and one query-level health monitor. Each bucket-level monitor groups the alarms of the last
+and two query-level monitors (a hash health check and the reader heartbeat). Each bucket-level monitor groups the alarms of the last
 5 days by **indicator** and keeps the count, first/last seen and value lists in the Alerting
-plugin's own alert (state `ACTIVE`, `ACKNOWLEDGED`, `COMPLETED`). They send no notifications
+plugin's own alert (state `ACTIVE`, `ACKNOWLEDGED`, `COMPLETED`). The bucket-level monitors send no notifications
 (`actions` is empty); the alerts are read through the Alerting API by the
 [IOC alert reader](../../shuffle/ioc-alert-reader/), which mirrors them into TheHive.
 
@@ -17,6 +17,7 @@ plugin's own alert (state `ACTIVE`, `ACKNOWLEDGED`, `COMPLETED`). They send no n
 | `ioc-hash-md5-t1.json` | alerts whose `ioc_hash.md5` is in `md5-1` to `md5-4` | `ioc_hash.md5` | same as SHA256 | Created and running on schedule; same query shape as SHA256, no positive control run |
 | `ioc-hash-sha1-t1.json` | alerts whose `ioc_hash.sha1` is in `sha1-1` | `ioc_hash.sha1` | same as SHA256 | Created and running on schedule; no positive control run |
 | `ioc-hash-health.json` | query-level health monitor, see below | n/a | n/a | Dry run: 0 hits over 30 minutes, 5 hits over 8 hours (documents from before the pipeline hook) |
+| `ioc-reader-heartbeat.json` | query-level monitor over the `ioc-reader-heartbeat` index, see below | n/a | n/a | Live: a real outage of the reader's orchestrator produced the message after 10 minutes and cleared itself |
 
 ## Behaviour
 
@@ -63,6 +64,29 @@ Limits to know about:
 minutes has a `data.win.eventdata.hashes` field but no `ioc_hash.sha256`, i.e. when the normalisation is not running.
 It shows the current state only; it does not report gaps from the past.
 
+## Reader heartbeat monitor
+
+`ioc-reader-heartbeat.json` is a query-level monitor over the `ioc-reader-heartbeat` index (written by the
+[alert reader](../../shuffle/ioc-alert-reader/) as the last step of every live run), severity 1, every minute. Its query asks for the document
+`reader` with `ok: true` and a `last_run` newer than 10 minutes; the trigger fires when there is none
+(`hits.total.value == 0`). Its action posts to a Notifications channel with a throttle of 60 minutes. The message
+template is the body that Telegram's `sendMessage` expects (`chat_id` and `text`). The file carries two placeholders you
+must replace before posting it: `<CHAT_ID>` and `<NOTIFICATION_CHANNEL_ID>`.
+
+The channel is a *Custom webhook* channel (method POST) whose URL is `https://api.telegram.org/bot<token>/sendMessage`,
+the approach in Wazuh's own [blog post](https://wazuh.com/blog/exploring-security-alerting-options-for-improved-threat-detection-in-wazuh-part-2)
+(written for Wazuh 4.8.1). The bot token is part of that URL, so it is stored in the channel configuration and readable by
+whoever can read the Notifications configuration; it is not part of this repository.
+
+It catches the reader node, the Shuffle orchestrator under it, or the path to TheHive stopping, so that no healthy run is
+recorded. It does not catch the Wazuh VM itself being down (the monitor runs there), a failure of the Telegram path, or a MISP outage
+(the reader still writes an ok heartbeat; failures of the list refresh have their own rules).
+
+Live (lab, 26 Oct 2026): stopping the Shuffle orchestrator at 10:39:20 UTC froze the heartbeat at 10:38:56 UTC; the Telegram
+message arrived with the period end 10:49:22 UTC; after the restart the heartbeat came back within about two minutes and the alert closed on its own. The 60-minute throttle
+was read back from the live monitor; whether it suppresses a repeat message in a long outage was not observed (the test outage lasted 11 minutes).
+The `ok: false` paths of the reader were exercised against fakes only.
+
 ## Create
 
 Wazuh dashboard, Indexer management, Dev Tools (one request per file; the body is the file content). The hash monitors
@@ -74,7 +98,7 @@ POST _plugins/_alerting/monitors
 ```
 
 Test a monitor without keeping it: `POST _plugins/_alerting/monitors/_execute?dryrun=true` with the
-same body. Reading the alerts requires the reserved `alerting_read_access` role (alerts get, monitor
+same body. The heartbeat monitor also needs its index, role and Notifications channel first (see the reader's README). Reading the alerts requires the reserved `alerting_read_access` role (alerts get, monitor
 get/search, findings get); map it to the read-only user the reader uses.
 
 ## Limits
@@ -83,4 +107,5 @@ Monitor and alert ids are assigned by your indexer and are not part of these fil
 no default notification channels (Notifications, Channels: 0 on the lab), and in a limited test (two
 template paths) a monitor action template resolved the bucket key but not the bucket's counts or value
 lists, which is why the alerts are read through the API instead of being pushed. Other template paths
-were not explored.
+were not explored. The lab later created one custom webhook channel (Telegram) for the heartbeat monitor; the bucket-level
+monitors still send nothing.

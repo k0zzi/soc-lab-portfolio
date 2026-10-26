@@ -20,8 +20,11 @@ from datetime import datetime, timezone
 # title, description and summary is kept by TheHive's History tab.
 # v1.4 added the hash monitors (ioc-hash-sha256-t1, -md5-, -sha1-): same mirroring, the observable type is hash
 # and the hash type (sha256, md5, sha1) is kept in the tags. IMPHASH is not matched (v1.5).
+# v1.6 writes ONE heartbeat document (index ioc-reader-heartbeat, fixed id) as the LAST step of every live run, after
+# the TheHive writes. "ok" is false only when the reader could not do its job (Alerting API or TheHive failed);
+# MISP trouble only thins the context section and does not count. A Wazuh monitor alerts when no fresh ok document exists.
 # ---------------------------------------------------------------------------
-VERSION = "1.5"
+VERSION = "1.6"
 DRY_RUN = True                       # True: plan only, NOTHING is written
 SOURCE = "wazuh-alerting-pilot"      # TheHive alert source (pilot)
 ALERT_TYPE = "wazuh-ioc"
@@ -47,6 +50,9 @@ CONTEXT_MARK = "**MISP context**"
 ANALYSIS = {"0": "initial", "1": "ongoing", "2": "completed"}
 INDEXER_NODE = "http_1"
 THEHIVE_NODE = "http_2"
+HEARTBEAT_INDEX = "ioc-reader-heartbeat"   # single document, overwritten after every live run
+HEARTBEAT_ID = "reader"
+HEARTBEAT_TIMEOUT = 10
 
 # monitor name -> how to present its alerts. "source" is the list the indicator comes from
 # (Splunk's threat_source_id), "side" which side of the event matched.
@@ -313,10 +319,26 @@ def build_context(attrs):
     return text
 
 
+def write_heartbeat(out, user, secret, ctx):
+    # Written LAST and only after a live run: a fresh document means the run got this far.
+    doc = {"last_run": iso_ms(int(time.time() * 1000)), "version": VERSION,
+           "ok": out["critical_errors"] == 0, "critical_errors": out["critical_errors"],
+           "errors": len(out["errors"]), "alerts_seen": out.get("alerts_seen", 0),
+           "created": len(out["created"]), "updated": len(out["updated"]), "recreated": len(out["recreated"])}
+    try:
+        status, _ = http_call("PUT", "%s/%s/_doc/%s" % (INDEXER_URL, HEARTBEAT_INDEX, HEARTBEAT_ID), body=doc,
+                              basic=(user, secret), ctx=ctx, timeout=HEARTBEAT_TIMEOUT)
+    except Exception:
+        status = 0
+    out["heartbeat"] = {"written": status in (200, 201), "status": status, "ok": doc["ok"]}
+    if status not in (200, 201):
+        out["errors"].append("heartbeat write failed (status %s)" % status)
+
+
 def sync(fe):
     out = {"version": VERSION, "dry_run": DRY_RUN, "source": SOURCE, "misp_node": MISP_NODE, "errors": [], "created": [],
            "updated": [], "recreated": [], "skipped_closed": [], "ignored_state": 0,
-           "ignored_monitor": 0, "plan": {}}
+           "ignored_monitor": 0, "plan": {}, "critical_errors": 0, "heartbeat": {"written": False}}
     t0 = time.time()
     ix = node_params(fe, INDEXER_NODE)
     th = node_params(fe, THEHIVE_NODE)
@@ -340,6 +362,7 @@ def sync(fe):
                                  basic=(ix_user, ix_pass), ctx=ctx)
         out["alerting_status"][state] = status
         if status != 200 or not isinstance(body, dict):
+            out["critical_errors"] += 1
             out["errors"].append("alerting query failed (%s alerts, status %s)%s" % (
                 state, status, "; is the alerting_read_access role mapped?" if state == READ_STATES[0] else ""))
             continue
@@ -413,6 +436,7 @@ def sync(fe):
         tag = "engine-alert:" + engine_id
         existing, err = latest_alert(tag)
         if err:
+            out["critical_errors"] += 1
             out["errors"].append("%s: %s" % (engine_id, err))
             continue
         action = "create"
@@ -459,6 +483,7 @@ def sync(fe):
             if changes:
                 st, res = hive("PATCH", "/api/v1/alert/%s" % existing.get("_id"), changes)
                 if st not in (200, 204):
+                    out["critical_errors"] += 1
                     out["errors"].append("%s: alert update failed (status %s)" % (engine_id, st))
                     continue
                 out["updated"].append({"engine_alert": engine_id, "fields": sorted(changes)})
@@ -479,7 +504,12 @@ def sync(fe):
         elif st == 400:
             out["plan"][engine_id]["result"] = "alert already exists (idempotent skip)"
         else:
+            out["critical_errors"] += 1
             out["errors"].append("%s: create failed (status %s)" % (engine_id, st))
+    if DRY_RUN:
+        out["heartbeat"] = {"written": False, "reason": "dry run"}
+    else:
+        write_heartbeat(out, ix_user, ix_pass, ctx)
     return out
 
 

@@ -1,0 +1,14 @@
+{
+  "cluster_permissions": [],
+  "index_permissions": [
+    {
+      "index_patterns": [
+        "ioc-reader-heartbeat"
+      ],
+      "allowed_actions": [
+        "indices:data/write/index*",
+        "indices:data/write/bulk*"
+      ]
+    }
+  ]
+}

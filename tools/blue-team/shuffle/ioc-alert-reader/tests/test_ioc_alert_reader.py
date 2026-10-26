@@ -1,4 +1,4 @@
-import contextlib, http.server, io, json, os, re, sys, threading
+import base64, contextlib, http.server, io, json, os, re, sys, threading, time
 from datetime import datetime, timezone
 
 SCRIPT = sys.argv[1] if len(sys.argv) > 1 else os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "ioc_alert_reader.py")
@@ -22,6 +22,8 @@ class World:
         self.misp_fn, self.misp_status, self.misp_requests = None, 200, []
         self.alerts, self.comments, self.cases = {}, [], {}
         self.patches, self.patch_fail, self.gets = [], False, []
+        self.hb, self.hb_status, self.hb_drop, self.hb_auth, self.events = [], 201, False, None, []
+        self.query_status, self.create_fail = 200, False
 
 
 W = World()
@@ -100,6 +102,8 @@ class H(http.server.BaseHTTPRequestHandler):
             fn = W.misp_fn or default_misp
             return self.reply(200, {"response": {"Attribute": fn(b["value"])}})
         if p == "/api/v1/query":
+            if W.query_status != 200:
+                return self.reply(W.query_status, {})
             name = b["query"][0]["_name"]
             if name == "getCase":
                 c = W.cases.get(b["query"][0]["idOrName"])
@@ -109,6 +113,8 @@ class H(http.server.BaseHTTPRequestHandler):
             found.sort(key=lambda a: -a["_createdAt"])
             return self.reply(200, found[:1])
         if p == "/api/v1/alert":
+            if W.create_fail:
+                return self.reply(500, {})
             for a in W.alerts.values():
                 if (a["type"], a["source"], a["sourceRef"]) == (b["type"], b["source"], b["sourceRef"]):
                     return self.reply(400, {"type": "CreateError"})
@@ -116,11 +122,24 @@ class H(http.server.BaseHTTPRequestHandler):
             a = dict(b)
             a.update({"_id": aid, "stage": "New", "_createdAt": len(W.alerts) + 1})
             W.alerts[aid] = a
+            W.events.append(("create", aid))
             return self.reply(201, {"_id": aid})
         if re.match(r"/api/v1/alert/([^/]+)/comment", p):
             W.comments.append(p)
             return self.reply(201, {"_id": "c"})
         self.reply(404, {})
+
+    def do_PUT(self):
+        b = self.body()
+        W.events.append(("hb", self.path))
+        W.hb_auth = self.headers.get("Authorization")
+        if W.hb_drop:
+            self.close_connection = True
+            return
+        if W.hb_status not in (200, 201):
+            return self.reply(W.hb_status, {"error": "x"})
+        W.hb.append((self.path, b))
+        self.reply(W.hb_status, {"result": "created"})
 
     def do_PATCH(self):
         b = self.body()
@@ -128,6 +147,7 @@ class H(http.server.BaseHTTPRequestHandler):
         if W.patch_fail:
             return self.reply(500, {"error": "x"})
         W.patches.append((aid, sorted(b)))
+        W.events.append(("patch", aid))
         W.alerts[aid].update(b)
         self.reply(204)
 
@@ -666,8 +686,8 @@ check("H10 dry run plans the md5 alert, writes nothing",
       and r["plan"]["H10"]["title"] == "Threat Activity Detected (%s, misp-hash-t1, CLT601)" % HMD5, r)
 
 # H11 version and configuration
-check("H11 version is 1.5 and exactly three hash monitors are configured with the same list",
-      'VERSION = "1.5"' in SRC and len(re.findall(r'"source": "misp-hash-t1"', SRC)) == 3 and len(re.findall(r'"htype": "', SRC)) == 3, "")
+check("H11 version is 1.6 and exactly three hash monitors are configured with the same list",
+      'VERSION = "1.6"' in SRC and len(re.findall(r'"source": "misp-hash-t1"', SRC)) == 3 and len(re.findall(r'"htype": "', SRC)) == 3, "")
 
 # H12 IMPHASH is not mirrored: an engine alert of an imphash monitor is ignored, nothing is written
 reset()
@@ -675,6 +695,149 @@ W.engine = [hash_alert("I1", "ioc-hash-imphash-t1", HIMP)]
 r = run()
 check("H12 an imphash monitor alert is ignored, nothing written, no error",
       r["ignored_monitor"] == 1 and W.alerts == {} and r["errors"] == [] and "imphash" not in SRC, r)
+
+# ---------------------------------------------------------------------------
+# B: heartbeat (v1.6)
+# ---------------------------------------------------------------------------
+HB_PATH = "/ioc-reader-heartbeat/_doc/reader"
+HB_KEYS = {"last_run", "version", "ok", "critical_errors", "errors", "alerts_seen", "created", "updated", "recreated"}
+
+# B1 a live run writes exactly one heartbeat document with the expected shape and credentials
+reset()
+W.engine = [fw_alert()]
+t_before = time.time()
+r = run()
+t_after = time.time()
+check("B1 exactly one heartbeat PUT to the fixed document id", len(W.hb) == 1 and W.hb[0][0] == HB_PATH, W.hb)
+doc = W.hb[0][1] if W.hb else {}
+check("B1 document has exactly the agreed fields", set(doc) == HB_KEYS, sorted(doc))
+check("B1 ok true, version 1.6, counts match the run",
+      doc.get("ok") is True and doc.get("version") == "1.6" and doc.get("critical_errors") == 0 and doc.get("alerts_seen") == 1
+      and doc.get("created") == 1 and doc.get("updated") == 0 and doc.get("recreated") == 0 and doc.get("errors") == 0, doc)
+try:
+    lr = datetime.strptime(doc.get("last_run", ""), "%Y-%m-%dT%H:%M:%S.%fZ").replace(tzinfo=timezone.utc).timestamp()
+except ValueError:
+    lr = 0
+check("B1 last_run is the current UTC time in ISO milliseconds", t_before - 2 <= lr <= t_after + 2, doc.get("last_run"))
+check("B1 heartbeat uses the indexer credentials (Basic auth)", W.hb_auth == "Basic " + base64.b64encode(b"u:p").decode(), W.hb_auth)
+check("B1 output reports the heartbeat", r["heartbeat"] == {"written": True, "status": 201, "ok": True}, r["heartbeat"])
+
+# B2 the heartbeat is the LAST request of the run, after the TheHive writes
+check("B2 heartbeat comes after the create", [e[0] for e in W.events] == ["create", "hb"], W.events)
+reset()
+W.engine = [fw_alert()]
+run()
+W.engine = [fw_alert(count=99, last=BASE + 99000)]
+W.events.clear()
+run()
+check("B2 heartbeat comes after the update", [e[0] for e in W.events] == ["patch", "hb"], W.events)
+
+# B3 dry run writes no heartbeat
+reset()
+W.engine = [fw_alert()]
+r = run(dry=True)
+check("B3 dry run: no PUT at all, output says why", W.hb == [] and [e for e in W.events if e[0] == "hb"] == []
+      and r["heartbeat"] == {"written": False, "reason": "dry run"}, r["heartbeat"])
+
+# B4 no engine alerts: the heartbeat is still written (it proves the reader runs, not that something matched)
+reset()
+r = run()
+check("B4 quiet run still writes an ok heartbeat", len(W.hb) == 1 and W.hb[0][1]["ok"] is True and W.hb[0][1]["alerts_seen"] == 0, W.hb)
+
+# B5 MISP trouble does not make the heartbeat unhealthy
+reset()
+W.engine = [fw_alert()]
+W.misp_status = 500
+r = run()
+check("B5 MISP failure: errors recorded and counted, heartbeat still ok",
+      r["errors"] != [] and W.hb[0][1]["ok"] is True and W.hb[0][1]["critical_errors"] == 0
+      and W.hb[0][1]["errors"] == len(r["errors"]), (r["errors"], W.hb))
+
+# B6 Alerting API failure makes it unhealthy, the heartbeat is still written
+reset()
+W.engine_status = 403
+r = run()
+check("B6 Alerting API failure: heartbeat written with ok false", len(W.hb) == 1 and W.hb[0][1]["ok"] is False and W.hb[0][1]["critical_errors"] >= 1, W.hb)
+
+# B7 TheHive query failure
+reset()
+W.engine = [fw_alert()]
+W.query_status = 500
+r = run()
+check("B7 TheHive query failure: ok false", len(W.hb) == 1 and W.hb[0][1]["ok"] is False and W.hb[0][1]["critical_errors"] == 1, (W.hb, r["errors"]))
+
+# B8 TheHive update failure
+reset()
+W.engine = [fw_alert()]
+run()
+W.engine = [fw_alert(count=99, last=BASE + 99000)]
+W.patch_fail = True
+W.hb.clear()
+r = run()
+check("B8 TheHive update failure: ok false", len(W.hb) == 1 and W.hb[0][1]["ok"] is False and W.hb[0][1]["critical_errors"] == 1, (W.hb, r["errors"]))
+
+# B9 TheHive create failure
+reset()
+W.engine = [fw_alert()]
+W.create_fail = True
+r = run()
+check("B9 TheHive create failure: ok false", len(W.hb) == 1 and W.hb[0][1]["ok"] is False and W.hb[0][1]["critical_errors"] == 1, (W.hb, r["errors"]))
+
+# B10 a refused heartbeat write is reported and does not stop the run or the TheHive work
+reset()
+W.engine = [fw_alert()]
+W.hb_status = 403
+r = run()
+check("B10 refused heartbeat: error reported, TheHive alert still written, not marked written",
+      "heartbeat write failed (status 403)" in r["errors"] and len(r["created"]) == 1 and r["heartbeat"]["written"] is False
+      and r["heartbeat"]["status"] == 403, r)
+
+# B11 a dropped connection on the heartbeat write is caught
+reset()
+W.engine = [fw_alert()]
+W.hb_drop = True
+r = run()
+check("B11 dropped heartbeat connection: no crash, status 0 reported",
+      "heartbeat write failed (status 0)" in r["errors"] and len(r["created"]) == 1 and r["heartbeat"]["status"] == 0, r)
+
+# B12 missing credentials: nothing is written, including the heartbeat
+reset()
+W.engine = [fw_alert()]
+r = run(src=SRC.replace('INDEXER_NODE = "http_1"', 'INDEXER_NODE = "http_9"'))
+check("B12 missing credentials: no heartbeat, no TheHive write, error reported",
+      W.hb == [] and W.alerts == {} and any("credentials not found" in e for e in r["errors"]), r)
+
+# B13 the same document is overwritten every run, no new document per run
+reset()
+run()
+run()
+run()
+check("B13 three runs, three PUTs, one and the same path", len(W.hb) == 3 and {p for p, _ in W.hb} == {HB_PATH}, [p for p, _ in W.hb])
+
+# B14 a run that writes nothing (closed alert, nothing newer) still writes the heartbeat
+reset()
+W.engine = [fw_alert()]
+run()
+for a in W.alerts.values():
+    a["stage"] = "Closed"
+W.hb.clear()
+r = run()
+check("B14 skipped-closed run still writes an ok heartbeat", len(r["skipped_closed"]) == 1 and len(W.hb) == 1 and W.hb[0][1]["ok"] is True, r)
+
+# B15 the run time budget does not suppress the heartbeat and is not a critical error
+reset()
+W.engine = [fw_alert()]
+r = run(src=SRC.replace("MAX_RUN_SECONDS = 50", "MAX_RUN_SECONDS = -1"))
+check("B15 budget reached: heartbeat written, ok stays true",
+      any("run time budget reached" in e for e in r["errors"]) and len(W.hb) == 1 and W.hb[0][1]["ok"] is True, r)
+
+# B16 configuration and hygiene
+check("B16 heartbeat index and id are the agreed constants, written once in the code",
+      'HEARTBEAT_INDEX = "ioc-reader-heartbeat"' in SRC and 'HEARTBEAT_ID = "reader"' in SRC and SRC.count("write_heartbeat(") == 2, "")
+reset()
+W.engine = [fw_alert()]
+r = run()
+check("B16 output still carries no credentials", "password" not in json.dumps(r).lower() and "Basic" not in json.dumps(r), r["heartbeat"])
 
 print("\n%d checks, %d failed" % (count[0], len(fails)))
 sys.exit(1 if fails else 0)

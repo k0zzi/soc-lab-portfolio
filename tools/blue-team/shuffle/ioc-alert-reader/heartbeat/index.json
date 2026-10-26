@@ -1,0 +1,40 @@
+{
+  "settings": {
+    "index": {
+      "number_of_shards": 1,
+      "number_of_replicas": 0
+    }
+  },
+  "mappings": {
+    "dynamic": "strict",
+    "properties": {
+      "last_run": {
+        "type": "date"
+      },
+      "version": {
+        "type": "keyword"
+      },
+      "ok": {
+        "type": "boolean"
+      },
+      "critical_errors": {
+        "type": "integer"
+      },
+      "errors": {
+        "type": "integer"
+      },
+      "alerts_seen": {
+        "type": "integer"
+      },
+      "created": {
+        "type": "integer"
+      },
+      "updated": {
+        "type": "integer"
+      },
+      "recreated": {
+        "type": "integer"
+      }
+    }
+  }
+}
