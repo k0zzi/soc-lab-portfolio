@@ -1,0 +1,121 @@
+{
+  "name": "ioc-hash-slots-failure",
+  "type": "monitor",
+  "monitor_type": "query_level_monitor",
+  "enabled": true,
+  "schedule": {
+    "period": {
+      "interval": 5,
+      "unit": "MINUTES"
+    }
+  },
+  "inputs": [
+    {
+      "search": {
+        "indices": [
+          "wazuh-alerts-*"
+        ],
+        "query": {
+          "size": 0,
+          "query": {
+            "bool": {
+              "filter": [
+                {
+                  "terms": {
+                    "rule.id": [
+                      "100341",
+                      "100342"
+                    ]
+                  }
+                },
+                {
+                  "range": {
+                    "timestamp": {
+                      "gte": "now-7d"
+                    }
+                  }
+                }
+              ]
+            }
+          },
+          "aggregations": {
+            "fail": {
+              "filter": {
+                "bool": {
+                  "filter": [
+                    {
+                      "term": {
+                        "rule.id": "100342"
+                      }
+                    },
+                    {
+                      "range": {
+                        "timestamp": {
+                          "lte": "now-30m"
+                        }
+                      }
+                    }
+                  ]
+                }
+              },
+              "aggregations": {
+                "last": {
+                  "max": {
+                    "field": "timestamp"
+                  }
+                }
+              }
+            },
+            "ok": {
+              "filter": {
+                "term": {
+                  "rule.id": "100341"
+                }
+              },
+              "aggregations": {
+                "last": {
+                  "max": {
+                    "field": "timestamp"
+                  }
+                }
+              }
+            }
+          }
+        }
+      }
+    }
+  ],
+  "triggers": [
+    {
+      "query_level_trigger": {
+        "name": "IOC Hash Slots Failed",
+        "severity": "2",
+        "condition": {
+          "script": {
+            "source": "def a = ctx.results[0].aggregations; if (a == null || a.fail.doc_count == 0) { return false; } def f = a.fail.last.value; def s = a.ok.last.value; return s == null || s < f;",
+            "lang": "painless"
+          }
+        },
+        "actions": [
+          {
+            "name": "telegram notify",
+            "destination_id": "<NOTIFICATION_CHANNEL_ID>",
+            "message_template": {
+              "source": "{\n  \"chat_id\": \"<CHAT_ID>\",\n \"text\": \"Wazuh Monitor {{ctx.monitor.name}} is in ALERT status.\\nTrigger: {{ctx.trigger.name}}\\nSeverity: {{ctx.trigger.severity}}\\nPeriod end: {{ctx.periodEnd}}\\nThe MISP hash slots update failed (rule 100342) and no later success (rule 100341) was recorded in the last 30 minutes. See /var/log/misp-hash-slots.log on the Wazuh manager.\"\n}",
+              "lang": "mustache"
+            },
+            "throttle_enabled": true,
+            "subject_template": {
+              "source": "Alerting Notification action",
+              "lang": "mustache"
+            },
+            "throttle": {
+              "value": 10,
+              "unit": "MINUTES"
+            }
+          }
+        ]
+      }
+    }
+  ]
+}

@@ -330,4 +330,11 @@
     <group>misp_hash_slots_failure,</group>
   </rule>
 
+  <rule id="100350" level="10" ignore="60">
+    <location>/var/log/filebeat/filebeat</location>
+    <match>Cannot index event</match>
+    <description>Filebeat could not index an event: the indexer rejected it (see full_log).</description>
+    <group>filebeat_index_failure,</group>
+  </rule>
+
 </group>

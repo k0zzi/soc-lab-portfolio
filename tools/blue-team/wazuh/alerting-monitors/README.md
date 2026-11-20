@@ -1,7 +1,7 @@
 # Wazuh Alerting monitors for IOC alerts
 
 Seven bucket-level monitors over `wazuh-alerts-*` (four for IP addresses and domains, three for file hashes)
-and two query-level monitors (a hash health check and the reader heartbeat). Each bucket-level monitor groups the alarms of the last
+and five query-level monitors (a hash health check, the reader heartbeat and three pipeline health monitors). Each bucket-level monitor groups the alarms of the last
 5 days by **indicator** and keeps the count, first/last seen and value lists in the Alerting
 plugin's own alert (state `ACTIVE`, `ACKNOWLEDGED`, `COMPLETED`). The bucket-level monitors send no notifications
 (`actions` is empty); the alerts are read through the Alerting API by the
@@ -18,6 +18,9 @@ plugin's own alert (state `ACTIVE`, `ACKNOWLEDGED`, `COMPLETED`). The bucket-lev
 | `ioc-hash-sha1-t1.json` | alerts whose `ioc_hash.sha1` is in `sha1-1` | `ioc_hash.sha1` | same as SHA256 | Created and running on schedule; no positive control run |
 | `ioc-hash-health.json` | query-level health monitor, see below | n/a | n/a | Dry run: 0 hits over 30 minutes, 5 hits over 8 hours (documents from before the pipeline hook) |
 | `ioc-reader-heartbeat.json` | query-level monitor over the `ioc-reader-heartbeat` index, see below | n/a | n/a | Live: a real outage of the reader's orchestrator produced the message after 10 minutes and cleared itself |
+| `ioc-sync-failure.json` | query-level, rules 100311 (success) and 100312 (failure), see below | n/a | n/a | Saved monitor read back, dry run and notification test; the failure branch has not been seen on a real failure (no 100312 alert is in the indexer) |
+| `ioc-hash-slots-failure.json` | query-level, rules 100341 (success) and 100342 (failure), see below | n/a | n/a | Both branches checked against real data; a real failure raised an alert and a Telegram message (2 Nov 2026); closing after a later success has not been observed |
+| `filebeat-index-rejects.json` | query-level, rule 100350, see below | n/a | n/a | Live, end to end with a synthetic log line (3 Nov 2026): the alert fired, the repeat was held by the throttle, and the alert closed on its own once the line left the 10-minute window |
 
 ## Behaviour
 
@@ -80,12 +83,31 @@ whoever can read the Notifications configuration; it is not part of this reposit
 
 It catches the reader node, the Shuffle orchestrator under it, or the path to TheHive stopping, so that no healthy run is
 recorded. It does not catch the Wazuh VM itself being down (the monitor runs there), a failure of the Telegram path, or a MISP outage
-(the reader still writes an ok heartbeat; failures of the list refresh have their own rules).
+(the reader still writes an ok heartbeat; failures of the list refresh have their own rules and monitors, see below).
 
 Live (lab, 26 Oct 2026): stopping the Shuffle orchestrator at 10:39:20 UTC froze the heartbeat at 10:38:56 UTC; the Telegram
 message arrived with the period end 10:49:22 UTC; after the restart the heartbeat came back within about two minutes and the alert closed on its own. The 60-minute throttle
 was read back from the live monitor; whether it suppresses a repeat message in a long outage was not observed (the test outage lasted 11 minutes).
 The `ok: false` paths of the reader were exercised against fakes only.
+
+## Pipeline health monitors
+
+Three query-level monitors (severity 2, every 5 minutes) watch the list refresh and the indexing path. They read alerts of
+`wazuh-alerts-*` and post to the same Notifications channel as the heartbeat monitor; each file carries the same two
+placeholders, `<CHAT_ID>` and `<NOTIFICATION_CHANNEL_ID>`.
+
+* `ioc-sync-failure.json`: the MISP IP and domain list refresh writes rule 100311 on success and rule 100312 on failure.
+  The monitor looks at the last 7 days and triggers when there is a failure older than 30 minutes and no success after
+  the latest of those failures. The 30 minutes give a later run time to succeed before anyone is notified. Throttle 10 minutes.
+* `ioc-hash-slots-failure.json`: the same pattern for the hash slot writer, rule 100342 (failure) and rule 100341
+  (success). Throttle 10 minutes.
+* `filebeat-index-rejects.json`: triggers when rule 100350 fired in the last 10 minutes. The rule matches the line
+  `Cannot index event` of the Filebeat log, which Wazuh reads through a `localfile` entry on `/var/log/filebeat/filebeat`
+  (`log_format` syslog, `restrict` `Cannot index event`). That entry belongs to the manager's `ossec.conf`, which is not part of
+  this repository. Throttle 60 minutes.
+
+These monitors read alerts that travel through the same Filebeat and indexer path they watch: if Filebeat or the indexer
+stops completely, they stay silent, like the heartbeat monitor.
 
 ## Create
 
@@ -98,7 +120,7 @@ POST _plugins/_alerting/monitors
 ```
 
 Test a monitor without keeping it: `POST _plugins/_alerting/monitors/_execute?dryrun=true` with the
-same body. The heartbeat monitor also needs its index, role and Notifications channel first (see the reader's README). Reading the alerts requires the reserved `alerting_read_access` role (alerts get, monitor
+same body. The heartbeat monitor also needs its index, role and Notifications channel first (see the reader's README); the three pipeline health monitors need the same channel. Reading the alerts requires the reserved `alerting_read_access` role (alerts get, monitor
 get/search, findings get); map it to the read-only user the reader uses.
 
 ## Limits
@@ -107,5 +129,5 @@ Monitor and alert ids are assigned by your indexer and are not part of these fil
 no default notification channels (Notifications, Channels: 0 on the lab), and in a limited test (two
 template paths) a monitor action template resolved the bucket key but not the bucket's counts or value
 lists, which is why the alerts are read through the API instead of being pushed. Other template paths
-were not explored. The lab later created one custom webhook channel (Telegram) for the heartbeat monitor; the bucket-level
+were not explored. The lab later created one custom webhook channel (Telegram) for the heartbeat monitor, and the three pipeline health monitors use the same channel; the bucket-level
 monitors still send nothing.
