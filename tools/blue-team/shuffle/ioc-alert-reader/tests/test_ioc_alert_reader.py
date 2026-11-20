@@ -686,8 +686,8 @@ check("H10 dry run plans the md5 alert, writes nothing",
       and r["plan"]["H10"]["title"] == "Threat Activity Detected (%s, misp-hash-t1, CLT601)" % HMD5, r)
 
 # H11 version and configuration
-check("H11 version is 1.6 and exactly three hash monitors are configured with the same list",
-      'VERSION = "1.6"' in SRC and len(re.findall(r'"source": "misp-hash-t1"', SRC)) == 3 and len(re.findall(r'"htype": "', SRC)) == 3, "")
+check("H11 version is 1.7 and exactly three hash monitors are configured with the same list",
+      'VERSION = "1.7"' in SRC and len(re.findall(r'"source": "misp-hash-t1"', SRC)) == 3 and len(re.findall(r'"htype": "', SRC)) == 3, "")
 
 # H12 IMPHASH is not mirrored: an engine alert of an imphash monitor is ignored, nothing is written
 reset()
@@ -697,7 +697,7 @@ check("H12 an imphash monitor alert is ignored, nothing written, no error",
       r["ignored_monitor"] == 1 and W.alerts == {} and r["errors"] == [] and "imphash" not in SRC, r)
 
 # ---------------------------------------------------------------------------
-# B: heartbeat (v1.6)
+# B: heartbeat (v1.6, unchanged in v1.7)
 # ---------------------------------------------------------------------------
 HB_PATH = "/ioc-reader-heartbeat/_doc/reader"
 HB_KEYS = {"last_run", "version", "ok", "critical_errors", "errors", "alerts_seen", "created", "updated", "recreated"}
@@ -711,8 +711,8 @@ t_after = time.time()
 check("B1 exactly one heartbeat PUT to the fixed document id", len(W.hb) == 1 and W.hb[0][0] == HB_PATH, W.hb)
 doc = W.hb[0][1] if W.hb else {}
 check("B1 document has exactly the agreed fields", set(doc) == HB_KEYS, sorted(doc))
-check("B1 ok true, version 1.6, counts match the run",
-      doc.get("ok") is True and doc.get("version") == "1.6" and doc.get("critical_errors") == 0 and doc.get("alerts_seen") == 1
+check("B1 ok true, version 1.7, counts match the run",
+      doc.get("ok") is True and doc.get("version") == "1.7" and doc.get("critical_errors") == 0 and doc.get("alerts_seen") == 1
       and doc.get("created") == 1 and doc.get("updated") == 0 and doc.get("recreated") == 0 and doc.get("errors") == 0, doc)
 try:
     lr = datetime.strptime(doc.get("last_run", ""), "%Y-%m-%dT%H:%M:%S.%fZ").replace(tzinfo=timezone.utc).timestamp()
@@ -838,6 +838,97 @@ reset()
 W.engine = [fw_alert()]
 r = run()
 check("B16 output still carries no credentials", "password" not in json.dumps(r).lower() and "Basic" not in json.dumps(r), r["heartbeat"])
+
+# ---------------------------------------------------------------------------
+# F: firewall feed-block monitors (v1.7): an address dropped because it is on an external threat-feed
+# alias is not a MISP match, so it is labelled differently and never looked up in MISP
+# ---------------------------------------------------------------------------
+FEED = "1.14.3.170"
+
+
+def feed_alert(aid, monitor, key=FEED, count=27, last=BASE + 5000, state="ACTIVE"):
+    return eng(aid, monitor, key, count, BASE, last, agent=(("OPNsense", count),), state=state,
+               action=[("block", count)], proto=[("tcp", count)], port=[("80", count)],
+               src=[("10.1.60.10", count)], rule=[("100360", count)], ids=[("1795178647.606", 1)])
+
+
+# F1 destination feed block: own source label, feed-block tag, no MISP tags, no MISP lookup
+reset()
+W.engine = [feed_alert("F1", "ioc-fw-feed-block-dst")]
+r = run()
+a = alerts_for(FEED)[0] if alerts_for(FEED) else {}
+check("F1 one alert created, no errors", len(r["created"]) == 1 and r["errors"] == [], r)
+check("F1 title carries the feed-block source label",
+      a.get("title") == "Threat Activity Detected (%s, opnsense-feed-block, OPNsense)" % FEED, a.get("title"))
+check("F1 tags: feed-block, indicator, engine alert, monitor; no misp-ioc and no tier1",
+      {"feed-block", "ioc:" + FEED, "engine-alert:F1", "monitor:ioc-fw-feed-block-dst"} <= set(a.get("tags", []))
+      and "misp-ioc" not in a.get("tags", []) and "tier1" not in a.get("tags", []), a.get("tags"))
+o = (a.get("observables") or [{}])[0]
+check("F1 observable is the ip, labelled as a feed block, tagged feed-block only",
+      (o.get("dataType"), o.get("data")) == ("ip", FEED) and o.get("message") == "Threat feed block (OPNsense alias)"
+      and "feed-block" in o.get("tags", []) and "misp-ioc" not in o.get("tags", []) and "tier1" not in o.get("tags", []), o)
+check("F1 no MISP query was made and the description has no MISP context section",
+      W.misp_requests == [] and "**MISP context**" not in a.get("description", ""), W.misp_requests)
+check("F1 plan says MISP is not applicable", r["plan"]["F1"]["misp"] == {"status": "not applicable (feed block)", "attributes": None}, r["plan"])
+d = a.get("description", "")
+for line in ("- Action: block (27)", "- Rules: 100360 (27)", "- Match side: destination", "- Source IP: 10.1.60.10 (27)"):
+    check("F1 description line: " + line, line in d.splitlines(), d)
+check("F1 description header names the feed-block source", "source opnsense-feed-block" in d.splitlines()[0], d[:200])
+
+# F2 source side feed block
+reset()
+W.engine = [feed_alert("F2", "ioc-fw-feed-block-src")]
+r = run()
+a = alerts_for(FEED)[0] if alerts_for(FEED) else {}
+check("F2 source side: accepted, labelled, no MISP lookup",
+      len(r["created"]) == 1 and r["errors"] == [] and "feed-block" in a.get("tags", []) and "misp-ioc" not in a.get("tags", [])
+      and "- Match side: source" in a.get("description", "").splitlines() and W.misp_requests == [], r)
+
+# F3 the same address in a MISP monitor and a feed monitor stays two alerts with their own labels
+reset()
+W.engine = [fw_alert("E1", key=FEED), feed_alert("F3", "ioc-fw-feed-block-dst")]
+run()
+al = alerts_for(FEED)
+by = {x["sourceRef"]: x for x in al}
+check("F3 MISP match and feed block for one address are two alerts with their own labels",
+      len(al) == 2 and "tier1" in by["E1"]["tags"] and "misp-ioc" in by["E1"]["tags"] and "feed-block" not in by["E1"]["tags"]
+      and "feed-block" in by["F3"]["tags"] and "tier1" not in by["F3"]["tags"], [x["tags"] for x in al])
+check("F3 only the MISP alert was looked up in MISP", len(W.misp_requests) == 1, W.misp_requests)
+
+# F4 update and closed handling work the same for a feed alert and never query MISP
+reset()
+W.engine = [feed_alert("F4", "ioc-fw-feed-block-dst")]
+run()
+W.engine = [feed_alert("F4", "ioc-fw-feed-block-dst", count=30, last=BASE + 65000)]
+r = run()
+check("F4 count change patches description and summary only, no MISP query",
+      W.patches[-1][1] == ["description", "summary"] and W.misp_requests == [] and "**MISP context**" not in alerts_for(FEED)[0]["description"], W.patches)
+alerts_for(FEED)[0]["stage"] = "Closed"
+W.engine = [feed_alert("F4", "ioc-fw-feed-block-dst", count=31, last=BASE + 90000)]
+r = run()
+al = alerts_for(FEED)
+check("F4 new activity after closure opens a new feed-block alert, still no MISP query",
+      len(r["recreated"]) == 1 and len(al) == 2 and "feed-block" in al[1]["tags"] and W.misp_requests == [], [x["tags"] for x in al])
+
+# F5 MISP down does not touch a feed alert
+reset()
+W.engine = [feed_alert("F5", "ioc-fw-feed-block-dst")]
+W.misp_status = 500
+r = run()
+check("F5 MISP failure is irrelevant for a feed alert: no error, heartbeat ok", r["errors"] == [] and W.hb[0][1]["ok"] is True, r["errors"])
+
+# F6 configuration: both feed monitors configured with the same label, t1 monitors untouched
+check("F6 two feed monitors share one source label and are flagged as feed",
+      len(re.findall(r'"source": "opnsense-feed-block"', SRC)) == 2 and len(re.findall(r'"feed": True', SRC)) == 2
+      and '"ioc-fw-dst-t1": {' in SRC and '"ioc-fw-src-t1": {' in SRC, "")
+
+# F7 dry run plans the feed alert and writes nothing
+reset()
+W.engine = [feed_alert("F7", "ioc-fw-feed-block-src")]
+r = run(dry=True)
+check("F7 dry run plans a create with the feed-block title, writes nothing, no MISP query",
+      W.alerts == {} and r["plan"]["F7"]["action"] == "create" and "opnsense-feed-block" in r["plan"]["F7"]["title"] and W.misp_requests == [], r)
+
 
 print("\n%d checks, %d failed" % (count[0], len(fails)))
 sys.exit(1 if fails else 0)

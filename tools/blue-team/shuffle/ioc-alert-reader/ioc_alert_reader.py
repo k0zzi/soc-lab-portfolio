@@ -9,7 +9,7 @@ import urllib.request
 from datetime import datetime, timezone
 
 # ---------------------------------------------------------------------------
-# Reader (v1.5): the grouping lives in the Wazuh Alerting monitors (bucket-level monitors,
+# Reader (v1.7): the grouping lives in the Wazuh Alerting monitors (bucket-level monitors,
 # one alert per indicator and monitor, state and counts kept by the engine). This node keeps
 # NO state of its own: it reads the ACTIVE and ACKNOWLEDGED engine alerts through the Alerting API and writes
 # one TheHive alert per engine alert (title, description, summary kept in sync). Credentials
@@ -23,8 +23,11 @@ from datetime import datetime, timezone
 # v1.6 writes ONE heartbeat document (index ioc-reader-heartbeat, fixed id) as the LAST step of every live run, after
 # the TheHive writes. "ok" is false only when the reader could not do its job (Alerting API or TheHive failed);
 # MISP trouble only thins the context section and does not count. A Wazuh monitor alerts when no fresh ok document exists.
+# v1.7 adds the two firewall feed-block monitors (ioc-fw-feed-block-dst, -src): an address the firewall dropped because
+# it is on an external threat-feed alias, which is NOT a MISP match. Those alerts carry the tag feed-block instead of
+# misp-ioc and tier1, the source label opnsense-feed-block, and no MISP lookup is made for them.
 # ---------------------------------------------------------------------------
-VERSION = "1.6"
+VERSION = "1.7"
 DRY_RUN = True                       # True: plan only, NOTHING is written
 SOURCE = "wazuh-alerting-pilot"      # TheHive alert source (pilot)
 ALERT_TYPE = "wazuh-ioc"
@@ -59,6 +62,8 @@ HEARTBEAT_TIMEOUT = 10
 MONITORS = {
     "ioc-fw-dst-t1": {"dtype": "ip", "source": "misp-ip-t1", "side": "destination"},
     "ioc-fw-src-t1": {"dtype": "ip", "source": "misp-ip-t1", "side": "source"},
+    "ioc-fw-feed-block-dst": {"dtype": "ip", "source": "opnsense-feed-block", "side": "destination", "feed": True},
+    "ioc-fw-feed-block-src": {"dtype": "ip", "source": "opnsense-feed-block", "side": "source", "feed": True},
     "ioc-sysmon-ip-t1": {"dtype": "ip", "source": "misp-ip-t1", "side": "destination"},
     "ioc-domain-t1": {"dtype": "domain", "source": "misp-domain-t1", "side": "DNS query"},
     "ioc-hash-sha256-t1": {"dtype": "hash", "source": "misp-hash-t1", "side": "SHA256 (Sysmon hashes field)",
@@ -456,7 +461,9 @@ def sync(fe):
                 action = "recreate"
                 source_ref = "%s|%d" % (engine_id, last_ms)
         block, misp_state = None, "disabled"
-        if misp_ready:
+        if mon.get("feed"):
+            misp_state = "not applicable (feed block)"
+        elif misp_ready:
             attrs, merr = misp_lookup(indicator, misp_headers, ctx)
             if merr:
                 out["errors"].append("%s: %s" % (engine_id, merr))
@@ -489,14 +496,16 @@ def sync(fe):
                 out["updated"].append({"engine_alert": engine_id, "fields": sorted(changes)})
             continue
         type_tags = ["hash-type:" + mon["htype"]] if mon.get("htype") else []
+        base_tags = ["feed-block"] if mon.get("feed") else ["misp-ioc", "tier1"]
         body_new = {"type": ALERT_TYPE, "source": SOURCE, "sourceRef": source_ref,
                     "title": title, "description": description, "summary": summary,
                     "severity": 2, "tlp": 2, "pap": 2, "date": first_ms,
-                    "tags": ["misp-ioc", "tier1", "wazuh", "ioc:" + indicator, tag,
+                    "tags": base_tags + ["wazuh", "ioc:" + indicator, tag,
                              "monitor:" + str(engine.get("monitor_name"))] + type_tags,
                     "observables": [{"dataType": mon["dtype"], "data": indicator,
-                                     "message": "MISP IOC (tier 1)", "tlp": 2, "ioc": True,
-                                     "sighted": True, "tags": ["misp-ioc", "tier1"] + type_tags}]}
+                                     "message": "Threat feed block (OPNsense alias)" if mon.get("feed") else "MISP IOC (tier 1)",
+                                     "tlp": 2, "ioc": True,
+                                     "sighted": True, "tags": base_tags + type_tags}]}
         st, res = hive("POST", "/api/v1/alert", body_new)
         if st == 201 and isinstance(res, dict):
             (out["recreated"] if action == "recreate" else out["created"]).append(

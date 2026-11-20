@@ -24,8 +24,8 @@ The hash monitors work the same way over `ioc_hash.*` fields that an ingest pipe
 | Title | `Threat Activity Detected (<indicator>, <source list>, <reporting hosts>)`, at most 256 bytes |
 | `sourceRef` | the engine alert id; `<id>\|<last seen ms>` for an alert opened after an analyst closed the previous one |
 | `date` | first seen in the monitor window at creation |
-| Tags | `misp-ioc`, `tier1`, `wazuh`, `ioc:<indicator>`, `engine-alert:<id>`, `monitor:<name>`, and `hash-type:<type>` for hash monitors |
-| Observable | the indicator (`ip`, `domain` or `hash`; a hash observable also carries `hash-type:<type>`) |
+| Tags | `misp-ioc`, `tier1`, `wazuh`, `ioc:<indicator>`, `engine-alert:<id>`, `monitor:<name>`, and `hash-type:<type>` for hash monitors. The feed-block monitors carry `feed-block` instead of `misp-ioc` and `tier1` |
+| Observable | the indicator (`ip`, `domain` or `hash`; a hash observable also carries `hash-type:<type>`). For a feed block the observable message reads `Threat feed block (OPNsense alias)` and it carries `feed-block` instead of `misp-ioc` and `tier1` |
 | Description | header, monitor, engine alert id and state, when the engine alert opened, alarms in the window, first/last seen, match side, **Details** value lists, then the **MISP context** section |
 | Summary | `count=N first=<UTC> last=<UTC>` |
 | Comments | never written; they stay for analysts. TheHive's History tab records every update |
@@ -34,6 +34,10 @@ The hash monitors work the same way over `ioc_hash.*` fields that an ingest pipe
 event id, DNS query, match kind, reporting host and rules, plus the latest alarm ids, capped at 2 KB combined
 (least frequent values go first, oldest alarm ids first). Protocol and port are separate lists because a
 bucket aggregation cannot pair them.
+
+A feed block (monitors `ioc-fw-feed-block-dst` and `-src`: the firewall dropped an address that is on an external
+threat-feed alias, not a MISP match) has the source label `opnsense-feed-block`, makes **no MISP query** and has no
+MISP context section.
 
 **MISP context** comes from a live `attributes/restSearch` for the indicator (published events, IDS flag,
 the same decay overrides the list sync uses) and lists the events (id, info, creating organisation,
@@ -118,6 +122,10 @@ both write actions, on that one index and nothing else.
 - **MISP context is a live query**, with no confidence value and no threat level (see above).
 - Hash alerts exist for SHA256, MD5 and SHA1 only. IMPHASH is not matched (see the monitors README).
 - Tier 1 indicators only; the tier 2 list is not mirrored.
+- **Feed blocks** are mirrored by their own monitors and labelled differently from MISP matches (see above). The
+  six feed aliases share one rule label per direction, so the alert cannot name which feed list blocked the address.
+- **TheHive severity is fixed** (medium) for every alert; it does not follow the firewall action. The rule level in
+  Wazuh does (see the monitors README).
 
 ## Verification
 
@@ -142,14 +150,24 @@ alert; a second query from a new process 18 minutes later raised its count to 2 
 domain included). Six synthetic Sysmon network events sent to the Wazuh analysis socket opened one alert for the Sysmon IP monitor that
 grouped two rules and two processes and carried the MISP section.
 
+Live (lab, 20 Nov 2026, reader 1.7): a real connection attempt from the lab client to an address on a threat-feed
+alias (blocked by the firewall, rule 100360) reached TheHive as an alert; that first alert was written before the
+feed-block monitors existed, carried the MISP labels and showed no MISP record, which led to the feed-block monitors
+and reader 1.7. The 1.7 dry run over the 29 open engine alerts reported no errors and no created alerts; the live
+run updated one alert and wrote the heartbeat (HTTP 200: the document already existed). With `ioc-fw-feed-block-dst`
+running, the new alert carried the tags `feed-block`, `ioc:<ip>`, `wazuh` and `monitor:ioc-fw-feed-block-dst`, no `misp-ioc`
+or `tier1`, an `ip` observable tagged `feed-block`, the Details lists (action block, rule 100360) and no MISP section
+(checked in TheHive). The observable's message text was not looked at in TheHive.
+
 Only against fakes: the lifecycle of imported alerts with open or closed cases, the 256-byte title, 2 KB
 details and 2 KB context bounds with hundreds of values, a failing Alerting query for one state,
 the behaviour when MISP is down or unreachable (alert still written, existing section kept), the
 sanitising and defanging of MISP text, missing MISP credentials, the alert content of the MD5 and SHA1
 monitors, MISP context for a hash that MISP does know, the heartbeat's `ok: false` paths (a failing Alerting
-query, a failing TheHive query, update or create), and a refused or dropped heartbeat write.
+query, a failing TheHive query, update or create), and a refused or dropped heartbeat write, the feed-block alerts (labels, no MISP query, update and closed
+handling, MISP down) and the source-side feed-block monitor.
 
-Not verified: monitor content for `ioc-fw-src-t1` on real alarms, `ioc-sysmon-ip-t1` on a real IOC connection
+Not verified: monitor content for `ioc-fw-src-t1` and `ioc-fw-feed-block-src` on real alarms, `ioc-sysmon-ip-t1` on a real IOC connection
 (only synthetic events were seen), the Shuffle run-quota impact of a 60 s schedule (about 43,200 runs per 30
 days if the unit is workflow runs), `alertState=ACKNOWLEDGED` outside the lab's Wazuh 4.14.5, and whether the
 heartbeat monitor's 60-minute throttle suppresses a second message in a long outage (the setting was read back
@@ -160,8 +178,8 @@ from the live monitor; the test outage lasted 11 minutes).
 1. Map the reserved `alerting_read_access` role to the read-only indexer user:
    `PUT _plugins/_security/api/rolesmapping/alerting_read_access` with `{"users": ["<user>"]}`
    (check first that the mapping does not exist; the request replaces it).
-2. Create the monitors from [`../../wazuh/alerting-monitors/`](../../wazuh/alerting-monitors/): four for IP
-   addresses and domains, three for hashes (the hash monitors need the slot index and its documents first).
+2. Create the monitors from [`../../wazuh/alerting-monitors/`](../../wazuh/alerting-monitors/): six for IP
+   addresses and domains (two of them for firewall feed blocks), three for hashes (the hash monitors need the slot index and its documents first).
 3. In a Shuffle workflow add three HTTP nodes that only carry credentials, plus the Python node:
    - `http_1`: `username` and `password` parameters of the indexer account,
    - `http_2`: `headers` parameter `Authorization: Bearer <TheHive service account key>`,
@@ -186,7 +204,7 @@ from the live monitor; the test outage lasted 11 minutes).
 
 Constants at the top of the script: `SOURCE`, `ALERT_TYPE`, `INDEXER_URL`, `THEHIVE_URL`, `MISP_URL`,
 `MISP_NODE`, `MISP_DECAY` and `MISP_DECAY_MODEL` (keep them equal to the list sync's decay settings),
-`MONITORS` (monitor name to indicator type, source list, match side and, for hashes, label and hash type), `READ_STATES`, `MAX_ALERTS`
+`MONITORS` (monitor name to indicator type, source list, match side, a `feed` flag for the feed-block monitors and, for hashes, label and hash type), `READ_STATES`, `MAX_ALERTS`
 (500 per state), `MAX_TITLE_BYTES`, `MAX_DETAILS_BYTES`, `MAX_CONTEXT_BYTES`, `MAX_RUN_SECONDS`, `HEARTBEAT_INDEX`, `HEARTBEAT_ID`, `HEARTBEAT_TIMEOUT`.
 
 ## Tests
@@ -196,8 +214,8 @@ python3 tests/test_ioc_alert_reader.py
 ```
 
 Standard library only; it starts a fake Alerting API, a fake TheHive and a fake MISP on 127.0.0.1 and
-runs 152 checks. During development deliberate faults were injected into the node (31 for the original
-version, 14 more for the hash monitors, 20 more for the heartbeat) and each one was caught (the harness is not part of this repository).
+runs 171 checks. During development deliberate faults were injected into the node (31 for the original
+version, 14 more for the hash monitors, 20 more for the heartbeat, 6 more for the feed-block monitors) and each one was caught (the harness is not part of this repository).
 
 ## Sources
 
