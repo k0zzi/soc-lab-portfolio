@@ -9,7 +9,8 @@ MISP --(restSearch, daily + on start)--> misp_ioc_sync.py  (Wazuh command module
         v
 Wazuh rules   100301-100305  IPv4 match (Sysmon Event 3)
               100320/100321  exact domain match (Sysmon Event 22, CDB lookup)
-              100330-100333  IPv4 match on OPNsense firewall logs (both ends, alert-only)
+              100330-100337  IPv4 match on OPNsense firewall logs (both ends; blocks rank lower)
+              100360/100361  firewall blocks by the threat-feed aliases (not a MISP match)
         |
         +-- rule 100160 alerts (every non-excluded DNS query)
               --> custom-misp-domain (integration script)  normalized + suffix match
@@ -28,13 +29,24 @@ Shuffle  (group misp_ioc_domain_t1, tier 1 only)  -->  TheHive: one alert per Wa
 | `../validation/domain_ioc_marker_test.py` | Acceptance harness: harmless `.example` markers, real DNS queries from an endpoint, PASS/FAIL per query |
 | `../../shuffle/misp-domain-workflow/` | Shuffle node code and TheHive request body for the domain workflow |
 
-## Firewall matching (rules 100330-100333)
+## Firewall matching (rules 100330-100337, 100360-100361)
 
 OPNsense filterlog events (decoded by the stock `pf` decoder, children of rule 87700) are matched against the IP
 CDB lists on both ends of the connection: `dstip` (100330 tier 1, 100332 tier 2) and `srcip` (100331 tier 1,
-100333 tier 2). Allowed and blocked traffic are both matched; the action is shown in the alert description.
-Levels are 10 (tier 1) and 7 (tier 2), the same local convention as the Sysmon IP rules. These rules are
-alert-only: nothing from them is forwarded to Shuffle or TheHive. They live in `../local_rules/local_rules.xml`.
+100333 tier 2). Passed and translated (`nat`) traffic stays at level 10 for both tiers. Blocked traffic is caught
+by child rules at level 7: 100334 and 100335 (tier 1, `dstip` and `srcip`), 100336 and 100337 (tier 2). The level
+follows the firewall action; the tier stays in the rule id and in the group (`misp_ioc_fw_t1` / `misp_ioc_fw_t2`,
+plus `misp_ioc_fw_block` for blocks). The level scale and keeping the tier out of the level are a local choice:
+Sentinel, Splunk ES and QRadar do not agree on how source confidence and action affect severity.
+
+Rules 100360 (`dstip`) and 100361 (`srcip`) are different: they are children of the stock rule 87701 (a firewall
+block) and fire when an OPNsense threat-feed alias rule blocked the traffic. They do not use the CDB lists, are
+not MISP matches, and cannot name the feed list because the aliases share one rule label per direction. Level 7.
+
+No `<integration>` block forwards these alerts. Tier 1 matches (100330, 100331, 100334, 100335) and the feed
+blocks reach TheHive through Wazuh Alerting monitors and the Shuffle reader
+([`../alerting-monitors/`](../alerting-monitors/), [`../../shuffle/ioc-alert-reader/`](../../shuffle/ioc-alert-reader/));
+tier 2 stays in Wazuh. The rules live in `../local_rules/local_rules.xml`.
 
 ## Design decisions
 

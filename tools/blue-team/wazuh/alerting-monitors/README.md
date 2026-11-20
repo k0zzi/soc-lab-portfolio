@@ -1,6 +1,6 @@
 # Wazuh Alerting monitors for IOC alerts
 
-Seven bucket-level monitors over `wazuh-alerts-*` (four for IP addresses and domains, three for file hashes)
+Nine bucket-level monitors over `wazuh-alerts-*` (six for IP addresses and domains, three for file hashes)
 and five query-level monitors (a hash health check, the reader heartbeat and three pipeline health monitors). Each bucket-level monitor groups the alarms of the last
 5 days by **indicator** and keeps the count, first/last seen and value lists in the Alerting
 plugin's own alert (state `ACTIVE`, `ACKNOWLEDGED`, `COMPLETED`). The bucket-level monitors send no notifications
@@ -9,8 +9,10 @@ plugin's own alert (state `ACTIVE`, `ACKNOWLEDGED`, `COMPLETED`). The bucket-lev
 
 | File | Rules (local_rules.xml) | Bucket key | Value lists kept in the alert | Verification |
 |---|---|---|---|---|
-| `ioc-fw-dst-t1.json` | 100330 (firewall, destination matched) | `data.dstip` | action, protocol, port, source IP, reporting host, rules, alarm ids | Live: alert content and lifecycle observed on real alarms |
-| `ioc-fw-src-t1.json` | 100331 (firewall, source matched) | `data.srcip` | action, protocol, port, destination IP, reporting host, rules, alarm ids | Dry run clean; no real alert content seen yet |
+| `ioc-fw-dst-t1.json` | 100330, 100334 (firewall, destination matched; allowed and blocked) | `data.dstip` | action, protocol, port, source IP, reporting host, rules, alarm ids | Live: alert content and lifecycle observed on real alarms |
+| `ioc-fw-src-t1.json` | 100331, 100335 (firewall, source matched; allowed and blocked) | `data.srcip` | action, protocol, port, destination IP, reporting host, rules, alarm ids | Dry run clean; no real alert content seen yet |
+| `ioc-fw-feed-block-dst.json` | 100360 (firewall block by a threat-feed alias, destination listed) | `data.dstip` | action, protocol, port, source IP, reporting host, rules, alarm ids | Live, real blocked connection (20 Nov 2026): the alert reached TheHive with the feed-block labels |
+| `ioc-fw-feed-block-src.json` | 100361 (firewall block by a threat-feed alias, source listed) | `data.srcip` | action, protocol, port, destination IP, reporting host, rules, alarm ids | Dry run clean (no matching alarm yet); no real alert content seen |
 | `ioc-sysmon-ip-t1.json` | 100301, 100304 (Sysmon IP) | `data.win.eventdata.destinationIp` | port, process image, reporting host, rules, alarm ids | Dry run clean; no real alert content seen yet |
 | `ioc-domain-t1.json` | 100320, 100322 (DNS) | scripted (see below) | queried name, match kind, reporting host, rules, alarm ids | Dry run over 30 days of real alarms (18 alarms, 10 buckets) clean; the persisted monitor is empty until a new alarm arrives |
 | `ioc-hash-sha256-t1.json` | alerts whose `ioc_hash.sha256` is in the slot documents `sha256-1` to `sha256-4` | `ioc_hash.sha256` | process image, parent process, event id, reporting host, rules, alarm ids | Dry run with a positive-control slot (one real hash, 59 alarms, every list filled); no real MISP match seen yet |
@@ -40,6 +42,36 @@ plugin's own alert (state `ACTIVE`, `ACKNOWLEDGED`, `COMPLETED`). The bucket-lev
   against its documentation here).
 - The firewall monitors see the firewall as the reporting host (`agent.name`); the internal client
   appears only as a raw address in the source/destination list.
+- The JSON files leave the `terms` ordering, `min_doc_count` and the trigger's `gap_policy` at their defaults. The
+  live monitors created or updated on 20 Nov 2026 were posted with those values written out explicitly, so the files
+  are equivalent to the live definitions, not byte-identical.
+
+## Firewall block monitors
+
+Two kinds of firewall alarms reach the four firewall monitors. Matches against tier 1 MISP indicators (rules 100330,
+100331, 100334 and 100335, `ioc-fw-*-t1`) and blocks by the OPNsense threat-feed aliases (rules 100360 and 100361,
+`ioc-fw-feed-block-*`). The tier 2 rules (100332, 100333, 100336, 100337) raise Wazuh alerts only; no monitor mirrors
+them to TheHive. A feed block is not a MISP match: the address is on an external feed list that the firewall
+enforces, so the TheHive alert carries the tag `feed-block` and the source label `opnsense-feed-block`, not `misp-ioc`
+and `tier1`, and the reader makes no MISP lookup for it. If an address is both a MISP indicator and on a feed list,
+the MISP rule (100334 or 100335) wins in the rule engine (measured) and the alarm lands in the t1 monitor.
+
+Rule levels (see `local_rules.xml`): an allowed connection to a listed address is level 10, a blocked one level 7,
+for both MISP tiers. The tier stays in the rule id and group (`misp_ioc_fw_t1`, `misp_ioc_fw_t2`), not in the level.
+
+Deviations from the vendors, to be read as our choice rather than a standard:
+
+* **Level scale.** The split by firewall action follows Microsoft Sentinel's documentation (allowed rated higher than
+  blocked), read in full. Splunk Enterprise Security 8.0 (read in full) does not change severity for a source: a source
+  weight (1 to 100, default 60) feeds the risk score. IBM QRadar (read through a Juniper JSA 7.5.0 mirror; IBM's own
+  pages could not be read) uses a confidence threshold at match time, and denied sessions can create offenses by
+  default. The three disagree on how the source and the action should count, so the scale is ours; keeping the tier
+  out of the level is our reading of that disagreement.
+* **Tier-weighted risk score** (the Splunk approach) is not implemented; it needs a layer that aggregates scores.
+* **Feed list not named.** The six feed aliases share one rule label per direction, so the alert cannot say which
+  list blocked the address.
+* **TheHive severity** is fixed (medium) and does not follow the action; only the Wazuh level does.
+* A `nat` action of the firewall is matched by rule 100330 at level 10.
 
 ## Hash monitors
 

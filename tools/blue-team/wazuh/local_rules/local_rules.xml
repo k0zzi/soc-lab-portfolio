@@ -294,18 +294,62 @@
     <group>misp_ioc_fw_t1,</group>
   </rule>
 
-  <rule id="100332" level="7">
+  <rule id="100332" level="10">
     <if_sid>87700</if_sid>
     <list field="dstip" lookup="address_match_key">etc/lists/misp-ip-t2</list>
     <description>MISP IOC (tier 2, firewall $(action)): $(srcip) to $(dstip):$(dstport) ($(protocol))</description>
     <group>misp_ioc_fw_t2,</group>
   </rule>
 
-  <rule id="100333" level="7">
+  <rule id="100333" level="10">
     <if_sid>87700</if_sid>
     <list field="srcip" lookup="address_match_key">etc/lists/misp-ip-t2</list>
     <description>MISP IOC (tier 2, firewall $(action)): $(srcip) to $(dstip):$(dstport) ($(protocol))</description>
     <group>misp_ioc_fw_t2,</group>
+  </rule>
+
+  <!-- Blocked matches rank below allowed ones (severity follows the firewall action; tier stays in rule id and group) -->
+  <rule id="100334" level="7">
+    <if_sid>100330</if_sid>
+    <action>block</action>
+    <description>MISP IOC (tier 1, firewall $(action)): $(srcip) to $(dstip):$(dstport) ($(protocol))</description>
+    <group>misp_ioc_fw_t1,misp_ioc_fw_block,</group>
+  </rule>
+
+  <rule id="100335" level="7">
+    <if_sid>100331</if_sid>
+    <action>block</action>
+    <description>MISP IOC (tier 1, firewall $(action)): $(srcip) to $(dstip):$(dstport) ($(protocol))</description>
+    <group>misp_ioc_fw_t1,misp_ioc_fw_block,</group>
+  </rule>
+
+  <rule id="100336" level="7">
+    <if_sid>100332</if_sid>
+    <action>block</action>
+    <description>MISP IOC (tier 2, firewall $(action)): $(srcip) to $(dstip):$(dstport) ($(protocol))</description>
+    <group>misp_ioc_fw_t2,misp_ioc_fw_block,</group>
+  </rule>
+
+  <rule id="100337" level="7">
+    <if_sid>100333</if_sid>
+    <action>block</action>
+    <description>MISP IOC (tier 2, firewall $(action)): $(srcip) to $(dstip):$(dstport) ($(protocol))</description>
+    <group>misp_ioc_fw_t2,misp_ioc_fw_block,</group>
+  </rule>
+
+  <!-- Blocks by the OPNsense threat-feed alias rules (one rule label per direction, shared by all feed aliases) -->
+  <rule id="100360" level="7">
+    <if_sid>87701</if_sid>
+    <id>^08cb19d4-0d8a-4fd4-a3d8-7cf87df9ed2b$</id>
+    <description>Blocked by threat feed alias (destination listed): $(srcip) to $(dstip):$(dstport) ($(protocol))</description>
+    <group>ioc_fw_block,</group>
+  </rule>
+
+  <rule id="100361" level="7">
+    <if_sid>87701</if_sid>
+    <id>^6e176903-abd4-463e-a4e8-37c8884bdd06$</id>
+    <description>Blocked by threat feed alias (source listed): $(srcip) to $(dstip):$(dstport) ($(protocol))</description>
+    <group>ioc_fw_block,</group>
   </rule>
 </group>
 
