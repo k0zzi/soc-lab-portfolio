@@ -270,10 +270,13 @@
 <!--
   MISP IOC matching on OPNsense firewall logs (decoded by the stock "pf" decoder).
   Both ends of the connection are checked (srcip and dstip); allowed and blocked traffic
-  are both matched, the action is shown in the description. These groups are alert-only:
-  nothing here is forwarded to Shuffle/TheHive yet.
+  are both matched, the action is shown in the description. No integration block forwards
+  these alerts; tier 1 matches reach TheHive through Wazuh Alerting monitors and the Shuffle
+  alert reader, tier 2 stays in Wazuh.
 
-  Levels: 10 = tier 1, 7 = tier 2, the same convention as rules 100301/100302/100304/100305.
+  Levels (since 2026-11-20): 10 for an allowed or translated connection, 7 for a blocked one
+  (child rules 100334-100337), for both tiers; the tier is in the rule id and group.
+  Before that date the levels were 10 = tier 1, 7 = tier 2.
   This is a local convention, not a vendor value (Sentinel's firewall analytic rules use one
   fixed severity; Splunk ES scales risk by threat-list weight). Keep both levels below any
   catch-all integration level filter (a level 13 filter existed in ossec.conf when this was

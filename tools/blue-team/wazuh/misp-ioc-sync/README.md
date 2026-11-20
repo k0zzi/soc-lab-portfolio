@@ -16,7 +16,7 @@ Wazuh rules   100301-100305  IPv4 match (Sysmon Event 3)
               --> custom-misp-domain (integration script)  normalized + suffix match
               --> rules 100322 / 100323 (match), 100324 (script failure)
         v
-Shuffle  (group misp_ioc_domain_t1, tier 1 only)  -->  TheHive: one alert per Wazuh alert
+Wazuh Alerting monitors (tier 1, one alert per indicator)  -->  Shuffle alert reader  -->  TheHive
 ```
 
 ## Components
@@ -27,7 +27,9 @@ Shuffle  (group misp_ioc_domain_t1, tier 1 only)  -->  TheHive: one alert per Wa
 | `../custom-integrations/custom-misp-domain` | Wazuh integration: matches the DNS name after normalization, and its parent names for `domain` entries |
 | `../custom-integrations/install_domain_integration.py` | Installs the integration, its rules and the `<integration>` block with pre-checks and rollback |
 | `../validation/domain_ioc_marker_test.py` | Acceptance harness: harmless `.example` markers, real DNS queries from an endpoint, PASS/FAIL per query |
-| `../../shuffle/misp-domain-workflow/` | Shuffle node code and TheHive request body for the domain workflow |
+| `../alerting-monitors/` | Wazuh Alerting monitors that group the tier 1 matches per indicator |
+| `../../shuffle/ioc-alert-reader/` | Shuffle node that mirrors the monitors' alerts into TheHive with MISP context |
+| `../../shuffle/misp-domain-workflow/` | Node code and TheHive request body of the earlier per-match domain workflow (switched off on 26 Oct 2026; kept for reference) |
 
 ## Firewall matching (rules 100330-100337, 100360-100361)
 
@@ -66,9 +68,12 @@ tier 2 stays in Wazuh. The rules live in `../local_rules/local_rules.xml`.
   through IDNA. No locale-dependent call is used anywhere (checked by a static test).
 - **Safe writes:** nothing is written unless every query succeeded and every list passes a shrink guard;
   writes are atomic; the ruleset is hot-reloaded through analysisd; a failed run is an alert (rule 100312).
-- **TheHive (domain workflow):** `sourceRef` is the Wazuh alert id (a re-delivered alert is refused, a new match is a new alert),
-  `date` is the Wazuh alert time, the observable is the *matched indicator* so TheHive's similarity groups all
-  occurrences of one indicator.
+- **TheHive:** tier 1 matches reach TheHive through the Alerting monitors and the alert reader, one alert per
+  indicator (see [`../../shuffle/ioc-alert-reader/`](../../shuffle/ioc-alert-reader/)). The earlier per-match
+  domain workflow (`sourceRef` = Wazuh alert id, one TheHive alert per match) and the per-match IPv4 workflow were
+  switched off on 26 Oct 2026; their `<integration>` blocks are disabled.
+- **Failed runs** raise rule 100312; the monitor `ioc-sync-failure` sends a notification when no successful run
+  (rule 100311) follows a failure (see [`../alerting-monitors/`](../alerting-monitors/)).
 
 ## Observed behaviour (lab, Wazuh 4.14.x)
 
@@ -92,7 +97,10 @@ tier 2 stays in Wazuh. The rules live in `../local_rules/local_rules.xml`.
 
 ## Known limits
 
-- Enforcement (firewall alias, DNS blocklist) is not wired; this is detection only.
+- The MISP lists are used for detection only; they are not published to the firewall or the DNS resolver. The lab's
+  OPNsense blocks addresses and names from external feed lists configured on the firewall itself (not from MISP and
+  not part of this repository). Rules 100360 and 100361 report the address blocks; blocked DNS names are not
+  reported to Wazuh yet.
 - `json-paged` pulls every attribute of a type and decides decay locally, so a run is slower than `text-bulk`
   (composite types return many rows). Measured in the lab: a live run (IP lists with `json-paged`, domain lists
   with `text-bulk`) took 199 s; a dry run with `json-paged` for both took 397 s (6 min 37 s). The Wazuh command
@@ -104,10 +112,8 @@ tier 2 stays in Wazuh. The rules live in `../local_rules/local_rules.xml`.
 - IPv6 and CIDR entries are skipped in the CDB lists (CDB keys cannot hold them).
 - Rule 100160 excludes some noisy suffixes, so IOCs under those suffixes are not seen by the integration.
 - Suffix matching can raise false positives for shared platforms; no popularity filter is enabled yet.
-- Tier 2 is not forwarded to Shuffle. Hashes are not covered by this component.
-- Only the **domain** workflow is in this repository and creates one TheHive alert per match. The IPv4 matches
-  reach TheHive through a separate Shuffle workflow that is not included here and still deduplicates per
-  indicator, host and day.
+- Tier 2 is not forwarded to TheHive. Hashes are not covered by this component (see
+  [`../misp-hash-slots/`](../misp-hash-slots/)).
 
 ## Deployment notes (placeholders only)
 
@@ -115,7 +121,7 @@ tier 2 stays in Wazuh. The rules live in `../local_rules/local_rules.xml`.
 <wodle name="command">
   <disabled>no</disabled><tag>misp-ioc-sync</tag>
   <command>/usr/bin/python3 /usr/local/sbin/misp_ioc_sync.py --wazuh</command>
-  <interval>1d</interval><time>03:30</time><run_on_start>yes</run_on_start>
+  <interval>1d</interval><time>10:00</time><run_on_start>yes</run_on_start>
   <ignore_output>no</ignore_output><timeout>900</timeout>
 </wodle>
 
@@ -124,17 +130,20 @@ tier 2 stays in Wazuh. The rules live in `../local_rules/local_rules.xml`.
   <rule_id>100160</rule_id>
   <alert_format>json</alert_format>
 </integration>
-
-<integration>
-  <name>shuffle</name>
-  <hook_url>http://<shuffle-host>:3001/api/v1/hooks/<REDACTED_WEBHOOK_ID></hook_url>
-  <group>misp_ioc_domain_t1</group>
-  <alert_format>json</alert_format>
-</integration>
 ```
 
+The lab's hosts are switched off at night, so a fixed night-time `<time>` never ran there; the time was moved to
+10:00 and `run_on_start` covers the start of the day. The run at start fails if MISP is not ready yet (in the lab MISP
+answered HTTP 500 for about 12 minutes after boot, one measurement); the failure is an alert (rule 100312) and the
+previous lists stay in place.
+
+The `shuffle` integration block of the earlier per-match domain workflow (group `misp_ioc_domain_t1`) is disabled in
+the live configuration and is not shown here.
+
 The MISP key lives in a root-only file (`/etc/misp-ioc-sync/misp.key`, mode 600). The Wazuh Shuffle integration
-sends no authentication header (its `api_key` option is not used), so the webhook must not require one.
+sends no authentication header (its `api_key` option is not used), so the webhook must not require one. Checked on
+the lab's Wazuh 4.14.5 on 20 Nov 2026: the installed `shuffle.py` sends only `content-type` and `Accept-Charset`,
+no `shuffle` block sets `<api_key>`, and the webhooks it calls run on those requests.
 The upstream Wazuh shuffle script (current master) writes its arguments, including any `<api_key>` value and the
 hook URL, to `integrations.log`; check whether the installed version does the same before putting a secret there.
 

@@ -111,7 +111,7 @@ both write actions, on that one index and nothing else.
 
 ### Documented deviations
 
-- **Polling, not push.** Notifications are not wired: Wazuh 4.14 ships no default channel (a custom webhook
+- **Polling, not push.** The bucket-level monitors send no notifications: Wazuh 4.14 ships no default channel (a custom webhook
   channel can be created), and in a limited test (two template paths) a monitor action template resolved the
   bucket key but not the bucket's counts or lists. Other template paths were not explored.
 - **One-way.** Closing a TheHive alert does not touch the engine alert; acknowledging in Wazuh does not

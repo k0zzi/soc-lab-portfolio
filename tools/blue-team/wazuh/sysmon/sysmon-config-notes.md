@@ -40,6 +40,13 @@ level, usually 0):
 | 100170  | 61603            | 1 (Process creation) | Forwards every process hash to the SOAR hash-correlation workflow. |
 | 100180  | 61605            | 3 (Network connection) | Filters out RFC1918/loopback/link-local destinations, forwarding only external connections. |
 
+These three rules were built for the per-event MISP workflows. Those
+workflows were switched off on 26 Oct 2026 (their integration blocks are
+disabled); the rules still raise level 3 alerts, and rule 100160 still
+feeds the domain matching integration (`custom-misp-domain`). The IOC
+matching that replaced the workflows uses its own rules (100301 onwards)
+and is described in `tools/blue-team/wazuh/misp-ioc-sync/`.
+
 `local_rules.xml` also holds the detection rules and default-rule
 corrections written during the Atomic Red Team capstone. Those are
 documented per technique in `tools/red-team/findings/`.

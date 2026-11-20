@@ -21,7 +21,8 @@ to show how the system was reasoned about, not just that it runs.
   domain names) are exported by a script into Wazuh CDB lists and matched
   locally on the manager, so only matches leave the SIEM instead of every
   event being looked up in MISP. IPv4 indicators are matched on Sysmon
-  network connections and on OPNsense firewall logs (both directions). DNS
+  network connections and on OPNsense firewall logs (both directions; a
+  blocked connection ranks lower than an allowed one). DNS
   names are normalized (ASCII-only case folding, trailing dot, IDNA) and
   matched on label boundaries, including subdomains of domain-type
   indicators. See
@@ -36,7 +37,8 @@ to show how the system was reasoned about, not just that it runs.
   the monitor definitions are in
   [tools/blue-team/wazuh/alerting-monitors/](tools/blue-team/wazuh/alerting-monitors/).
   The reader also writes a heartbeat record after every run, and a monitor sends a Telegram message when no healthy
-  record is fresh for 10 minutes.
+  record is fresh for 10 minutes. Further monitors send a Telegram message when the MISP list refresh or the hash
+  slot writer fails, or when Filebeat reports that the indexer rejected an alert.
 - **Hash matching (pilot)**: file hashes do not use the CDB route, because Wazuh's decoders did not split
   the Sysmon hash string for Windows event-channel events in the lab. An ingest pipeline splits it into typed
   fields at index time, a script writes the last 30 days of published MISP hash indicators (SHA256, MD5,
@@ -46,6 +48,11 @@ to show how the system was reasoned about, not just that it runs.
   [tools/blue-team/wazuh/misp-hash-slots/](tools/blue-team/wazuh/misp-hash-slots/),
   [tools/blue-team/wazuh/ingest/](tools/blue-team/wazuh/ingest/) and
   [tools/blue-team/wazuh/alerting-monitors/](tools/blue-team/wazuh/alerting-monitors/).
+- **Enforcement (partial)**: OPNsense blocks addresses on external threat-feed lists in both directions
+  (URL-table aliases) and answers names on a national feed's domain list with `0.0.0.0` (Unbound DNS blocklist).
+  These lists are configured on the firewall and are not MISP data; the firewall configuration is not part of this
+  repository. Address blocks raise Wazuh alerts (rules 100360 and 100361) that the alert layer mirrors into TheHive
+  with their own label; blocked DNS names are not reported to Wazuh yet.
 - **SOAR**: the alert layer above is the only IOC path into TheHive. The
   earlier IOC workflows, which queried MISP for every network, DNS or
   process-hash event with deduplication and fail-closed error handling, and
@@ -56,7 +63,7 @@ to show how the system was reasoned about, not just that it runs.
   unchanged.
 - **Case management**: TheHive + Cortex for incident triage.
 - **Detection-as-code**: Sigma and Wazuh rules, version-controlled,
-  CI-scanned for secrets before merge. The MISP sync script, the hash slot
+  scanned for secrets by gitleaks in CI on every push. The MISP sync script, the hash slot
   writer, the domain matching integration, the Shuffle node code (domain workflow and alert
   reader) and the acceptance harness have unit tests (standard library only).
 - **Adversary emulation & detection validation**: Atomic Red Team
@@ -81,8 +88,8 @@ tools/
       misp-hash-slots/       — MISP hash indicators to indexer slot documents for terms lookups, with tests
       ingest/                — ingest pipeline that splits Sysmon hashes into typed fields, and how to hook it in
     shuffle/
-      shuffle-workflows/     — exported SOAR workflows (original per-event IOC correlation)
-      misp-domain-workflow/  — Shuffle node code and TheHive request body for the domain workflow
+      shuffle-workflows/     — exported SOAR workflows (port-scan block, Telegram alert receiver, retired per-event IOC workflows)
+      misp-domain-workflow/  — node code and TheHive request body of the retired per-match domain workflow
       ioc-alert-reader/      — Shuffle node that mirrors the monitors' alerts into TheHive with MISP context and writes a heartbeat, with tests
     thehive/   — case-management integration notes
     sigma/     — SIEM-agnostic detection rules (Sigma format)
@@ -94,8 +101,9 @@ docs/ — step-by-step build documentation (HTML)
 
 ## A note on secrets
 
-All webhook UUIDs, API keys, and service credentials in this repo have
-been redacted as `<REDACTED_TYPE>` placeholders. Lab-internal IP
+All webhook UUIDs, API keys, service credentials and chat ids in this
+repo have been replaced by placeholders (`<REDACTED_TYPE>`,
+`YOUR_VALUE_HERE`, `<CHAT_ID>` and similar). Lab-internal IP
 addresses (RFC1918, `10.1.x.x`) are left intact — they're not usable
 outside this network and are useful for explaining the VLAN
 architecture. See `secret-scan.sh` for the manual literal-string scan
@@ -111,12 +119,14 @@ socket, and the inbound firewall monitor not yet on real alarms. The reader's
 heartbeat and its Telegram notification were verified by stopping the Shuffle
 orchestrator on purpose (details in
 [tools/blue-team/shuffle/ioc-alert-reader/](tools/blue-team/shuffle/ioc-alert-reader/)).
+A real blocked connection to an address on a feed list reached TheHive with the
+feed-block label; the inbound feed-block monitor has not seen a real alarm yet.
 Hash matching is a pilot too: the chain from a Sysmon hash to a TheHive alert
 was verified end to end with a control value placed in a slot, but no hash
-listed in MISP has appeared in the lab's events yet. IPv6/CIDR indicators and
-enforcement (firewall alias, DNS blocklist) are not done yet. The MISP page under `docs/` still describes
-the original per-event design; the local-matching redesign is described in
-[tools/blue-team/wazuh/misp-ioc-sync/](tools/blue-team/wazuh/misp-ioc-sync/)
-until that page is updated.
+listed in MISP has appeared in the lab's events yet. IPv6/CIDR indicators are
+not matched, MISP lists are not yet published to the firewall or the DNS
+resolver, and blocked DNS names do not raise a Wazuh alert yet. The MISP page
+under `docs/` covers the original per-event design and summarises the current
+one; the details are in the tool folders linked above.
 
 See the [live documentation](https://k0zzi.github.io/soc-lab-portfolio/) or the `docs/` folder for completed build steps.

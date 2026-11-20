@@ -42,4 +42,10 @@ to a certificate trust failure.
 - License: Community (StrangeBee).
 - Verified live: cases created from MISP-correlated Wazuh alerts
   (network, DNS, and hash indicator correlation — see the exported
-  workflows in `tools/blue-team/shuffle/shuffle-workflows/`).
+  workflows in `tools/blue-team/shuffle/shuffle-workflows/`). Those
+  per-event workflows were switched off on 26 Oct 2026.
+- Since then, MISP matches reach TheHive as alerts (one per indicator)
+  written by the Shuffle alert reader from Wazuh Alerting monitors; see
+  `tools/blue-team/shuffle/ioc-alert-reader/`. This path does not use the
+  native TheHive↔MISP connector described above (whose state was not
+  re-checked when this note was updated).

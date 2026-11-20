@@ -496,7 +496,7 @@
       <div class="vm-row"><span class="field">IP address</span><span class="val">10.1.30.11</span></div>
       <div class="vm-row"><span class="field">VLAN</span><span class="val white">VLAN30 — SOC</span></div>
       <div class="vm-row"><span class="field">Install directory</span><span class="val">/opt/Shuffle</span></div>
-      <div class="vm-row"><span class="field">Access</span><span class="val white">http://10.1.30.11:3001</span></div>
+      <div class="vm-row"><span class="field">Access</span><span class="val white">https://10.1.30.11:3443 (UI) · webhooks on http://10.1.30.11:3001</span></div>
     </div>
 
     <div class="steps">
@@ -559,7 +559,7 @@ sudo docker ps   <span class="c"># should show 5 running containers</span></code
 
     <div class="vm-card">
       <div class="vm-card-title">Running Containers</div>
-      <div class="vm-row"><span class="field">shuffle-frontend</span><span class="val white">React UI — port 3001</span></div>
+      <div class="vm-row"><span class="field">shuffle-frontend</span><span class="val white">React UI — HTTPS 3443 (webhook URLs use HTTP 3001)</span></div>
       <div class="vm-row"><span class="field">shuffle-backend</span><span class="val white">API and workflow engine</span></div>
       <div class="vm-row"><span class="field">shuffle-orborus</span><span class="val white">Worker manager</span></div>
       <div class="vm-row"><span class="field">shuffle-opensearch</span><span class="val white">Data storage</span></div>
@@ -585,6 +585,14 @@ sudo docker ps   <span class="c"># should show 5 running containers</span></code
     <h3>Token-Based Authentication</h3>
 
     <p>"Require Authentication" was enabled on every workflow's webhook. Shuffle generates a token; requests without it are rejected.</p>
+
+    <div class="callout warn">
+      <span class="callout-icon">⚠</span>
+      <div class="callout-body">
+        <strong>Update — November 2026</strong>
+        Wazuh's stock <code>shuffle</code> integration script does not send a token. The installed script (read on 20 Nov 2026) posts with only the <code>content-type</code> and <code>Accept-Charset</code> headers, and none of the <code>shuffle</code> blocks in <code>ossec.conf</code> sets an <code>&lt;api_key&gt;</code>. Both workflows of this chapter still run on Wazuh's calls, so these webhooks accept requests without the token. How Shuffle evaluates the webhook's authentication setting for these calls was not examined.
+      </div>
+    </div>
 
     <pre><code><span class="label">Test without a token</span>curl -X POST http://10.1.30.11:3001/api/v1/hooks/WEBHOOK_ID
 <span class="c"># Response: {"success": false}  ← correct behavior</span>
@@ -796,6 +804,14 @@ rule.id:100100
       <div class="callout-body">
         <strong>Working</strong>
         Whenever Wazuh generates a level 10+ alert, an instant Telegram notification arrives. Since rule 100100 is also level 10, port-scan alerts show up through this channel too.
+      </div>
+    </div>
+
+    <div class="callout warn">
+      <span class="callout-icon">⚠</span>
+      <div class="callout-body">
+        <strong>Update — November 2026</strong>
+        In the live <code>ossec.conf</code> (read on 26 Oct 2026) this integration's threshold is <code>&lt;level&gt;13&lt;/level&gt;</code>, not 10; when and why it was raised was not recorded. With that threshold, rule 100100 (level 10) does not reach this channel (read from the configuration, not observed). Separately, health notifications of the IOC pipeline (a stale reader heartbeat, a failed list refresh, rejected alerts) now go to Telegram through a Wazuh Notifications webhook channel, not through Shuffle.
       </div>
     </div>
   </div>
@@ -1016,7 +1032,7 @@ alert = self.full_execution[<span class="s">"execution_argument"</span>]
           <tr><td>OPNsense API integration</td><td>shuffle_blocked_IPs alias · API key credential</td><td class="ok">● Active</td></tr>
           <tr><td>Floating rule</td><td>shuffle_blocked_IPs blocked on every interface — WAN included</td><td class="ok">● Active</td></tr>
           <tr><td>Wazuh custom rule 100100</td><td>ET SCAN signature filter — port-scan alerts only</td><td class="ok">● Active</td></tr>
-          <tr><td>ossec.conf integration</td><td>Two webhooks: general notification (level 10+) and port scan (rule 100100)</td><td class="ok">● Active</td></tr>
+          <tr><td>ossec.conf integration</td><td>Two webhooks: general notification (level 10+ when built; level 13 in the live configuration since) and port scan (rule 100100)</td><td class="ok">● Active</td></tr>
           <tr><td>Workflow 1: wazuh-alert-receiver</td><td>Level 10+ alert → instant Telegram notification</td><td class="ok">● Running</td></tr>
           <tr><td>Workflow 2: port-scan-auto-block</td><td>Port scan → IP analysis → OPNsense block → TheHive case</td><td class="ok">● Running</td></tr>
           <tr><td>TheHive integration</td><td>Automatic case creation · service account · 10.1.30.12:9000</td><td class="ok">● Active</td></tr>

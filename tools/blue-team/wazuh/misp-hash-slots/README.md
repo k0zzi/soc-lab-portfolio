@@ -164,7 +164,7 @@ PUT _plugins/_security/api/rolesmapping/ioc_hash_writer
   <tag>misp-hash-slots</tag>
   <command>/usr/bin/python3 /usr/local/sbin/misp_hash_slots.py --write</command>
   <interval>1d</interval>
-  <time>03:45</time>
+  <time>10:15</time>
   <run_on_start>yes</run_on_start>
   <ignore_output>no</ignore_output>
   <timeout>900</timeout>
@@ -174,17 +174,29 @@ PUT _plugins/_security/api/rolesmapping/ioc_hash_writer
 4. **Rules `100340` to `100342`** in the repository's [`local_rules.xml`](../local_rules/local_rules.xml): the base rule
    matches the location `command_misp-hash-slots`, `100341` (level 3) the success line and `100342` (level 12) the
    failure line. They match the script's JSON output with a space after the colon (`"result": "ok"`); changing
-   the output format breaks them.
+   the output format breaks them. The monitor `ioc-hash-slots-failure` in
+   [`../alerting-monitors/`](../alerting-monitors/) sends a notification when no success follows a failure.
 5. **Ingest hook.** The monitors compare `ioc_hash.*` fields that an ingest pipeline creates; see
    [`../ingest/`](../ingest/).
 
 ### Start order
 
-The run at manager start (`run_on_start`) fails with `MISP unreachable` if MISP is not up yet, and rule `100342`
-raises a level 12 alert; the slot documents then keep their previous content. A fixed `<time>` does not help on
-a host that is powered off at that time. In the lab the hypervisor starts all machines in the morning and the manager
-started before MISP, so the run at start failed. Start MISP first (in Proxmox: the Start/Shutdown order and the `up`
-delay of the guest that is started first) and check the next morning's log line.
+The run at manager start (`run_on_start`) fails if MISP is not ready yet, and rule `100342` raises a level 12
+alert; the slot documents then keep their previous content. A fixed `<time>` does not help on a host that is
+powered off at that time. In the lab the hosts are switched off at night, so the night-time schedule never ran and
+the time was moved to 10:15. In one measurement the MISP and Wazuh machines started in the same minute and MISP
+answered HTTP 500 for about 12 minutes; the run at start failed and the 10:15 run is the one that refreshes the
+slots. Starting MISP first (in Proxmox: the Start/Shutdown order and the `up` delay) would let the run at start
+succeed; this has not been applied in the lab.
+
+### Shrink guard after a feed outage
+
+The publish window counts from each event's publish time. When MISP stops receiving feed updates, the window
+empties and the shrink guard refuses the next write (the previous slots stay in place); a later bulk publication
+fills the window again, and when it ages out the guard can refuse again. In the lab the feed fetch was off from
+30 Sep to 2 Nov 2026; after it was turned back on the MD5 count stayed below half of the previous run, so the guard
+keeps refusing and rule `100342` fires every day. This was accepted as it is. A one-off run with a lower
+`shrink_guard_percent` in a `--config` file would reset the baseline; it was not done.
 
 ## Tests
 

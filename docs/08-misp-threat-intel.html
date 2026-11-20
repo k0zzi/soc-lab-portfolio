@@ -129,7 +129,7 @@
 <div class="hero">
   <div class="hero-tag">SOC Lab Series — Chapter 8</div>
   <h1>Building a <span>SOC Lab</span> From Scratch:<br>MISP — Threat Intelligence and IOC Correlation</h1>
-  <p class="hero-sub">Every other tool in this lab detects or investigates. MISP answers a narrower, more specific question: is this exact indicator already known to be bad? Feed ingestion, a native TheHive sync with a genuinely strange licensing bug, and three Shuffle workflows that turn a threat-intel platform into an active part of the detection pipeline.</p>
+  <p class="hero-sub">Every other tool in this lab detects or investigates. MISP answers a narrower, more specific question: is this exact indicator already known to be bad? Feed ingestion, a native TheHive sync with a genuinely strange licensing bug, the first per-event Shuffle workflows, and the local matching design that replaced them and turns a threat-intel platform into an active part of the detection pipeline.</p>
   <div class="hero-meta">
     <span>~35 min read</span>
     <span class="dot">·</span>
@@ -161,13 +161,21 @@
   <div style="margin-top: 64px;">
     <p>This post documents the eighth chapter of the SOC Lab build series. Chapters 1–7 built the pieces that generate and act on telemetry: network segmentation, endpoint visibility, IDS/IPS, SOAR automation, case management, and digital forensics. All of them share one blind spot — they only know what they can see happening <em>inside</em> this lab. None of them know that a given IP has been a Tor exit node for six months, or that a given file hash belongs to a known Mirai variant. That external knowledge is MISP's job.</p>
 
-    <p><strong>MISP (Malware Information Sharing Platform)</strong> is an IOC repository and sharing platform, not a detection engine. It ingests threat feeds from the outside world, stores them as structured events and attributes, and exposes them for lookup. Two completely separate paths were built in this lab to put that lookup to use: a <strong>native sync into TheHive</strong> (MISP pushes its own curated events in as alerts) and <strong>three Shuffle workflows</strong> that check Sysmon-observed hashes, domains, and IPs against MISP in real time. Both paths hit real, non-obvious problems before they worked.</p>
+    <p><strong>MISP (Malware Information Sharing Platform)</strong> is an IOC repository and sharing platform, not a detection engine. It ingests threat feeds from the outside world, stores them as structured events and attributes, and exposes them for lookup. Two completely separate paths were built in this lab to put that lookup to use: a <strong>native sync into TheHive</strong> (MISP pushes its own curated events in as alerts) and <strong>three Shuffle workflows</strong> that checked Sysmon-observed hashes, domains, and IPs against MISP in real time (since replaced by local matching, see Step 09). Both paths hit real, non-obvious problems before they worked.</p>
 
     <div class="callout info">
       <span class="callout-icon">ℹ</span>
       <div class="callout-body">
         <strong>Scope of This Chapter</strong>
         This chapter covers MISP itself and both of its integration paths. It does not cover OpenCTI — the graph/analysis layer that later consumes MISP's data via its own connector — which gets its own chapter once that work is complete.
+      </div>
+    </div>
+
+    <div class="callout warn">
+      <span class="callout-icon">⚠</span>
+      <div class="callout-body">
+        <strong>Update — November 2026</strong>
+        The three per-event Shuffle workflows in Steps 05–07 were switched off on 26 Oct 2026; those steps are kept as the record of how the first design was built and why it was replaced. MISP indicators are now matched locally inside Wazuh and its indexer, and the matches reach TheHive through an alert layer with health monitoring. The current design is summarised in <a href="#current-design">Step 09</a>; the code, rules and measurements are in the repository.
       </div>
     </div>
   </div>
@@ -186,17 +194,17 @@
       <span style="color:#444">↓ splits into two independent paths ↓</span><br>
       <span style="display:inline-flex;gap:24px;justify-content:center;flex-wrap:wrap;">
         <span class="arch-node blue">Native sync → TheHive<br><span style="font-size:10px;letter-spacing:0">MISP-curated events become Alerts</span></span>
-        <span class="arch-node blue">Shuffle restSearch<br><span style="font-size:10px;letter-spacing:0">Sysmon IOCs checked in real time</span></span>
+        <span class="arch-node blue">Local matching in Wazuh<br><span style="font-size:10px;letter-spacing:0">daily list export · monitors → TheHive</span></span>
       </span>
     </div>
 
     <div class="vm-card">
       <div class="vm-card-title">VM Inventory — New Addition</div>
-      <div class="vm-row"><span class="field">misp (SRV-MISP-306)</span><span class="val white">10.1.30.15 · Ubuntu 24.04 · 4 vCPU · 6 GB RAM · 40 GB disk</span></div>
+      <div class="vm-row"><span class="field">misp (SRV-MISP-306)</span><span class="val white">10.1.30.15 · Ubuntu 24.04 · 4 vCPU · 6 GB RAM · 70 GB disk (40 GB at install, grown twice)</span></div>
       <div class="vm-row"><span class="field">Storage pool</span><span class="val">sataProd.srv (ADATA SU650 SATA)</span></div>
       <div class="vm-row"><span class="field">VLAN</span><span class="val">30 — SOC · static IP · DHCP off</span></div>
       <div class="vm-row"><span class="field">Software</span><span class="val">MISP 2.5 branch (currently v2.5.40) · Apache2 · MariaDB · Redis · PHP 8.3</span></div>
-      <div class="vm-row"><span class="field">Consumers</span><span class="val">TheHive (native sync) · Shuffle (restSearch) · OpenCTI (Chapter 10, later)</span></div>
+      <div class="vm-row"><span class="field">Consumers</span><span class="val">TheHive (native sync) · Wazuh manager (daily list export, hash slot writer) · Shuffle alert reader (context lookups) · OpenCTI (later)</span></div>
     </div>
   </div>
 
@@ -288,6 +296,14 @@ bash /tmp/INSTALL.sh</code></pre>
     </div>
 
     <p>Deliberately skipped: <strong>ET Open block rules</strong> (Suricata already runs the full ET ruleset directly), the <strong>Tor "all nodes"</strong> list (a maintainer warning flagged lock-out risk on a lab-scale instance), <strong>Snort IP lists</strong> (redundant with Suricata's own coverage), and the <strong>Bambenek feeds</strong> (require a paid license). The final count landed at <strong>45 enabled feeds</strong>, refreshed on MISP's default daily schedule; four of them (feed IDs 50, 59, 75, 91) intermittently fail to fetch, which is unremarkable for free community sources and not worth chasing.</p>
+
+    <div class="callout warn">
+      <span class="callout-icon">⚠</span>
+      <div class="callout-body">
+        <strong>Update — November 2026: the Daily Fetch Had Stopped</strong>
+        No new event reached MISP from 30 Sep to 2 Nov 2026: the <em>Enabled</em> boxes of the fetch and cache jobs under <em>Administration → Scheduled Tasks</em> were off (why they were off is not known). The fetch job was switched back on (the cache job was left off) and its daily runs completed on the days checked in November; the event count went from 6,526 to 19,336 after the first run. 44 feeds are enabled at present, and seven of them (IDs 50, 59, 63, 64, 85, 86, 91) fail on every run, 63 and 64 with HTTP 410. The outage was noticed through the hash matching described in Step 09, whose input window counts from each event's publish time and emptied while nothing new was published.
+      </div>
+    </div>
 
     <div class="callout danger">
       <span class="callout-icon">✕</span>
@@ -492,6 +508,14 @@ bash /tmp/INSTALL.sh</code></pre>
     <div class="section-num">Step 05</div>
     <h2>Wazuh → MISP IOC Correlation: Hash Workflow (Shuffle)</h2>
 
+    <div class="callout warn">
+      <span class="callout-icon">⚠</span>
+      <div class="callout-body">
+        <strong>Retired on 26 Oct 2026 (Steps 05–07)</strong>
+        These workflows queried MISP once per event. They worked, but every network, DNS or process event that passed the filters cost a MISP query and a Shuffle run (the quota pressure is described in Steps 06 and 07). They were replaced by local matching (Step 09), where MISP is read once a day and only matches leave the SIEM. Their Wazuh integration blocks are disabled; the exports stay in the repository for reference. The text below describes them as they were built.
+      </div>
+    </div>
+
     <p>The native connector in Step 04 surfaces what MISP already knows and has published as an event. The three workflows in this section and the next two answer a different, more active question: for a hash, domain, or IP that Sysmon <em>just observed</em> on an endpoint, is it already listed in MISP right now? This is the same Shuffle instance built in Chapter 5, extended with three new automations — none of which Chapter 5 covered, since MISP didn't exist yet when that chapter was written.</p>
 
     <p>All three follow the same fail-closed shape: a narrow Wazuh child rule elevates only the events worth checking, Shuffle queries MISP's <code>restSearch</code> endpoint, and a hit creates a TheHive case while a miss closes cleanly with no case created.</p>
@@ -592,6 +616,14 @@ msftconnecttest\.com$|\.windowsupdate\.com$|
 
     <p>This is also why it isn't a single point of failure for the network-IOC workflow in Step 07: RFC1918/loopback/link-local exclusion is already enforced upstream, twice — once at the Wazuh rule level (100180) and once at the Shuffle level (the <code>cidr_ip_match</code> node). MISP's own warninglist mechanism, once activated, will be a third, complementary layer rather than the only thing standing between internal chatter and a false IOC match.</p>
 
+    <div class="callout warn">
+      <span class="callout-icon">⚠</span>
+      <div class="callout-body">
+        <strong>Update — November 2026</strong>
+        The list export of Step 09 asks MISP to apply its enabled warninglists (<code>enforceWarninglist</code>) to every query. One measurement shaped how: on MISP 2.5.40 the bulk text export with that flag removed 34,980 of 119,228 tier 2 IP addresses, while MISP's own <code>warninglists/checkValue</code> flagged almost none of a 300-address sample; paged JSON removed 24, all confirmed by <code>checkValue</code>. The IP lists are therefore exported as paged JSON. The two upstream filters mentioned above (rule 100180 and the Shuffle <code>cidr_ip_match</code> node) belonged to the retired network workflow.
+      </div>
+    </div>
+
     <div class="callout info">
       <span class="callout-icon">→</span>
       <div class="callout-body">
@@ -599,6 +631,38 @@ msftconnecttest\.com$|\.windowsupdate\.com$|
         Warninglist activation, the TheHive → MISP observable export (feeding analyst-confirmed IOCs from case work back into MISP), and Galaxy/MITRE ATT&CK tagging of MISP events are all still open. None of the three block anything already documented in this chapter — they extend it — and are picked up in a later pass once OpenCTI (Chapter 10) is in place and there's a full picture of what tagging scheme serves both platforms.
       </div>
     </div>
+  </div>
+
+  <!-- STEP 9: CURRENT DESIGN -->
+  <div class="section" id="current-design">
+    <div class="section-num">Step 09</div>
+    <h2>The Current Design: Local Matching and an Alert Layer</h2>
+
+    <p>The redesign moves the comparison to where the events already are. MISP is read once a day; Wazuh and its indexer compare every event against the exported indicators; only the matches leave the SIEM. The pieces, each with its own README, tests and measurements in the repository:</p>
+
+    <div class="table-wrap">
+      <table>
+        <thead><tr><th>Piece</th><th>What It Does</th></tr></thead>
+        <tbody>
+          <tr><td><a href="https://github.com/k0zzi/soc-lab-portfolio/tree/main/tools/blue-team/wazuh/misp-ioc-sync">List export</a></td><td>A Wazuh command-module script pulls IPv4 and domain indicators (IDS flag set, warninglists applied, MISP decay model) once a day and at manager start, and writes four CDB lists: tier 1 (published events) and tier 2 (unpublished) for IPs and domains. Sizes on 26 Oct 2026: 33,224 / 118,399 IPs and 76,620 / 194 domains. A failed run keeps the previous lists and raises an alert.</td></tr>
+          <tr><td><a href="https://github.com/k0zzi/soc-lab-portfolio/tree/main/tools/blue-team/wazuh/local_rules">Rules</a></td><td>Sysmon network connections (100301–100305), DNS queries (100320–100324; subdomains through a normalising integration script), OPNsense firewall logs in both directions (100330–100337; blocked connections rank lower) and blocks by the firewall's own threat-feed aliases (100360–100361).</td></tr>
+          <tr><td><a href="https://github.com/k0zzi/soc-lab-portfolio/tree/main/tools/blue-team/wazuh/misp-hash-slots">Hash matching</a></td><td>Wazuh's decoders did not split the Sysmon hash string for event-channel events in the lab, so an <a href="https://github.com/k0zzi/soc-lab-portfolio/tree/main/tools/blue-team/wazuh/ingest">ingest pipeline</a> splits it at index time, a script writes the last 30 days of published SHA256/MD5/SHA1 indicators into slot documents, and monitors compare the two with terms lookups. IMPHASH is deliberately not matched.</td></tr>
+          <tr><td><a href="https://github.com/k0zzi/soc-lab-portfolio/tree/main/tools/blue-team/wazuh/alerting-monitors">Alert layer</a></td><td>Wazuh Alerting bucket-level monitors group the matches of the last 5 days per indicator (count, first/last seen, value lists) and keep the alert state in the engine.</td></tr>
+          <tr><td><a href="https://github.com/k0zzi/soc-lab-portfolio/tree/main/tools/blue-team/shuffle/ioc-alert-reader">Alert reader</a></td><td>A stateless Shuffle node reads the open monitor alerts every 60 seconds and keeps one TheHive alert per indicator in step, with live MISP context (events, tags, decay score). Firewall feed blocks get their own label and no MISP lookup.</td></tr>
+          <tr><td>Health monitoring</td><td>The reader writes a heartbeat after every run; monitors send a Telegram message when the heartbeat is stale, when the list export or the hash slot writer fails, or when Filebeat reports that the indexer rejected an alert.</td></tr>
+        </tbody>
+      </table>
+    </div>
+
+    <div class="callout info">
+      <span class="callout-icon">ℹ</span>
+      <div class="callout-body">
+        <strong>How Far Each Part Was Verified</strong>
+        Domain matches and outbound firewall matches: real traffic, end to end into TheHive. Firewall feed blocks: one real blocked connection, end to end. Sysmon IP matches: synthetic events only. Inbound firewall matches: not yet seen on real alarms. Hashes: end to end with a control value placed in a slot; no hash listed in MISP has appeared in the lab's events yet. The heartbeat alert: a deliberate stop of the Shuffle orchestrator.
+      </div>
+    </div>
+
+    <p>What is still open: tier 2 indicators stay in Wazuh and are not mirrored to TheHive; IPv6 and CIDR indicators are not matched; MISP lists are not yet published to the firewall or the DNS resolver (the firewall blocks from its own external feed lists); and the monitors watch the same Filebeat and indexer path they depend on, so a complete stop of that path would go unnoticed.</p>
   </div>
 
   <!-- TROUBLESHOOTING -->
@@ -685,14 +749,15 @@ msftconnecttest\.com$|\.windowsupdate\.com$|
         <thead><tr><th>Component</th><th>Detail</th><th>Status</th></tr></thead>
         <tbody>
           <tr><td>MISP Server</td><td>v2.5.40 · Ubuntu 24.04 · 10.1.30.15</td><td class="ok">● Active</td></tr>
-          <tr><td>Feed ingestion</td><td>45 enabled feeds, daily automatic fetch + cache</td><td class="ok">● Running</td></tr>
+          <tr><td>Feed ingestion</td><td>44 enabled feeds, daily fetch from Scheduled Tasks (cache job off); 7 feeds fail on every run</td><td class="ok">● Running</td></tr>
           <tr><td>misp-modules enrichment</td><td>Port 6666 · hashlookup, whois, urlhaus, threatfox, malwarebazaar, threatminer, tls_certificate_check</td><td class="ok">● Active</td></tr>
           <tr><td>MISP ↔ Cortex link</td><td>Diagnostics: Enrichment / Import / Export / Cortex all green</td><td class="ok">● Verified</td></tr>
           <tr><td>TheHive native connector</td><td>10-minute sync interval · Community license · Case #74 validated end-to-end</td><td class="ok">● Active</td></tr>
-          <tr><td>misp-hash-ioc (Shuffle)</td><td>Sysmon Event 1 → cache dedup → MISP restSearch → TheHive</td><td class="ok">● Cases #586–588 verified</td></tr>
-          <tr><td>misp-dns-ioc (Shuffle)</td><td>Sysmon Event 22 → noise-filtered → MISP restSearch → TheHive</td><td class="ok">● Verified</td></tr>
-          <tr><td>misp-network-ioc (Shuffle)</td><td>Sysmon Event 3 → RFC1918-filtered → MISP restSearch → TheHive</td><td class="ok">● Verified</td></tr>
+          <tr><td>misp-hash-ioc (Shuffle)</td><td>Sysmon Event 1 → cache dedup → MISP restSearch → TheHive</td><td class="warn-cell">● Retired 26 Oct 2026 (was: Cases #586–588 verified)</td></tr>
+          <tr><td>misp-dns-ioc (Shuffle)</td><td>Sysmon Event 22 → noise-filtered → MISP restSearch → TheHive</td><td class="warn-cell">● Retired 26 Oct 2026 (was: Verified)</td></tr>
+          <tr><td>misp-network-ioc (Shuffle)</td><td>Sysmon Event 3 → RFC1918-filtered → MISP restSearch → TheHive</td><td class="warn-cell">● Retired 26 Oct 2026 (was: Verified)</td></tr>
           <tr><td>Proxmox snapshot</td><td>Taken after feed configuration, TheHive connector fix, and all three Shuffle workflows</td><td class="ok">● Taken</td></tr>
+          <tr><td>Local matching (Step 09)</td><td>Daily list export · CDB rules · hash slots · Alerting monitors · alert reader → TheHive · health monitors</td><td class="ok">● Pilot, running</td></tr>
         </tbody>
       </table>
     </div>
@@ -721,10 +786,13 @@ msftconnecttest\.com$|\.windowsupdate\.com$|
       <li>TheHive + Cortex — case management and enrichment <span class="badge done">Complete</span></li>
       <li>Velociraptor — digital forensics and incident response <span class="badge done">Complete</span></li>
       <li>MISP — threat intelligence and IOC correlation <span class="badge done">Complete</span></li>
+      <li>Atomic Red Team — detection validation of seven techniques <span class="badge done">Complete</span></li>
+      <li>IOC matching redesign — local matching, alert layer, hashes, health monitors <span class="badge next">Pilot</span></li>
+      <li>Enforcement — firewall and DNS blocking from threat-feed lists <span class="badge next">Partial</span></li>
       <li>OpenCTI — extended threat-intel graph layer</li>
       <li>Grafana (dashboards)</li>
       <li>OpenVAS / Greenbone (vulnerability management)</li>
-      <li>Atomic Red Team / Caldera (attack simulation)</li>
+      <li>Caldera (recurring adversary emulation)</li>
     </ul>
   </div>
 
