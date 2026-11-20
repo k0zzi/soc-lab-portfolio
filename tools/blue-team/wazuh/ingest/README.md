@@ -5,7 +5,8 @@ configured). Windows event-channel events do not pass through XML decoders, so t
 the pipeline in [`ioc-hash-normalize.json`](ioc-hash-normalize.json) writes the lowercase keyword fields
 `ioc_hash.sha1`, `ioc_hash.md5` and `ioc_hash.sha256`. The
 [hash monitors](../alerting-monitors/) compare those fields with the slot documents of the
-[slot writer](../misp-hash-slots/). IMPHASH is not extracted.
+[slot writer](../misp-hash-slots/). IMPHASH is not extracted. The pipeline also moves one string field of the
+MISP sync alerts out of the way of a Wazuh object field (see below).
 
 ## How it is called
 
@@ -23,10 +24,20 @@ expression (`<wazuh-alerts-4.x-{...}>`), and a `final_pipeline` set on the daily
 the original target, never ran in the lab (the pipeline's ingest counter stayed at the number of simulated
 documents). The cause was not established (observed on OpenSearch 2.19.5).
 
+## Sync alert field
+
+The pipeline starts with a rename processor that moves `data.program` to `ioc_sync.program`, only when the alert comes
+from the sync script (`location` is `command_misp-ioc-sync`) and the value is a string. The sync script's records
+(rules 100311 and 100312) carry a string in `data.program`, while Wazuh's index template maps `data.program` as an object
+(the package fields of the system inventory). In the lab the indexer rejected the whole document and Filebeat did not
+retry it, so these records reached `alerts.json` but not the index from 21 Oct to 2 Nov 2026. After the rename the
+records were indexed again (checked with real records on 2 Nov 2026). Rejections of this kind appear as rule 100350 and
+its [monitor](../alerting-monitors/).
+
 ## Install
 
 1. Create the pipeline in Dev Tools: `PUT _ingest/pipeline/ioc-hash-normalize` with the file's content. Test it first
-   with `POST _ingest/pipeline/_simulate` and a few documents (with and without `IMPHASH`, and without `hashes`).
+   with `POST _ingest/pipeline/_simulate` and a few documents (with and without `IMPHASH`, without `hashes`, and a sync alert with a string `data.program`).
 2. On the manager, back up and edit the module file (the script does nothing if the processor is already there,
    and stops without writing if `date_index_name` is not found exactly once):
 
@@ -65,4 +76,7 @@ The upgrade guides of the Wazuh versions checked (4.3 to 4.9) extract the Filebe
   name starting with `wazuh-archives`, but at that point `_index` is the date-math value. It is a leftover of an
   archive design that was not completed, and is kept so that this file equals the live pipeline. Remove or
   replace it when archives are added.
-* Documents indexed before the hook existed have no `ioc_hash` fields.
+* Documents indexed before the hook existed have no `ioc_hash` fields, and the sync records of 21 Oct to 2 Nov 2026 are
+  missing from the index (they remain in `alerts.json`).
+* The rename handles only the string `data.program` of the sync records. Another field that collides with a Wazuh
+  object field is not handled, and the rejection would be visible only through rule 100350 and its monitor.

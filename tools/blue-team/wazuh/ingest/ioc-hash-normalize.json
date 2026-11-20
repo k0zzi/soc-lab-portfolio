@@ -1,6 +1,14 @@
 {
-  "description": "IOC hash normalization: split Sysmon hashes into typed lowercase fields (sha1, md5, sha256); archives keep only events 1/29/23/26 with hashes",
+  "description": "IOC hash normalization: split Sysmon hashes into typed lowercase fields (sha1, md5, sha256); archives keep only events 1/29/23/26 with hashes; also moves the string data.program of misp-ioc-sync alerts to ioc_sync.program (Wazuh syscollector maps data.program as an object)",
   "processors": [
+    {
+      "rename": {
+        "field": "data.program",
+        "target_field": "ioc_sync.program",
+        "if": "ctx.location == 'command_misp-ioc-sync' && ctx.data?.program instanceof String",
+        "ignore_failure": true
+      }
+    },
     {
       "kv": {
         "field": "data.win.eventdata.hashes",
